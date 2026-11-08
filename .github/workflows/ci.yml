@@ -38,7 +38,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, pathlib
-          for f in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "hooks/hooks.json"):
+          for f in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"):
               json.loads(pathlib.Path(f).read_text())
           PY
           test -x scripts/sdd.sh

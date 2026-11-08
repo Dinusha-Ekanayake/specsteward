@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 (2026-11-08)
+
+### Changed
+- The plugin no longer declares hooks: the directory accepts command hooks only from Verified organizations. `/specsteward:init` now writes the same hooks into the project's `.claude/settings.json` (calling `.sdd/bin/sdd`). Projects set up with an earlier version must re-run `/specsteward:init` once, and restart Claude Code, to get the guards back.
+
 ## 0.3.1 (2026-11-05)
 
 Ready for the Claude plugin directory.

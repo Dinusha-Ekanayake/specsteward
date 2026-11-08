@@ -1,6 +1,6 @@
 ---
 name: init
-description: Set up specsteward in the current repository - detects the stack and the project's own lint, type and test commands, writes sdd.toml, spec/plan/tasks templates, the .gitignore entry and permission rules (approve, trust, start, resume, commit, push and PR stay behind "ask"), then checks the setup with `sdd doctor`. Use for "/specsteward:init".
+description: Set up specsteward in the current repository - detects the stack and the project's own lint, type and test commands, writes sdd.toml, spec/plan/tasks templates, the .gitignore entry and hooks and permission rules (approve, trust, start, resume, commit, push and PR stay behind "ask"), then checks the setup with `sdd doctor`. Use for "/specsteward:init".
 ---
 
 # specsteward init

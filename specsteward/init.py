@@ -82,6 +82,43 @@ def _merge_settings(path: Path) -> list[str]:
     return added
 
 
+# The plugin declares no hooks (the plugin directory refuses command hooks), so `init`
+# registers them in the project's own settings, where the user owns and can review them.
+HOOK_RUNNER = 'bash "$CLAUDE_PROJECT_DIR/.sdd/bin/sdd"'
+PROJECT_HOOKS: tuple[tuple[str, str, str, int], ...] = (
+    ("SessionStart", "", "hook-session-start", 30),
+    ("PreToolUse", "Edit|Write|MultiEdit|NotebookEdit", "hook-guard", 30),
+    ("PreToolUse", "Bash", "hook-shell-guard", 30),
+    ("PostToolUse", "Edit|Write|MultiEdit", "hook-format", 60),
+    ("PostToolUse", "Bash", "hook-bind", 30),
+    ("Stop", "", "hook-stop", 30),
+    ("SubagentStop", "", "hook-subagent-stop", 30),
+)
+
+
+def _merge_hooks(path: Path) -> list[str]:
+    """Add the specsteward hooks to a settings file; hooks already there are kept."""
+    settings: dict[str, Any] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    hooks = settings.setdefault("hooks", {})
+    added = []
+    for event, matcher, name, timeout in PROJECT_HOOKS:
+        command = f"{HOOK_RUNNER} {name}"
+        groups = hooks.setdefault(event, [])
+        if any(h.get("command") == command for g in groups for h in g.get("hooks", [])):
+            continue
+        entry = {"type": "command", "command": command, "timeout": timeout}
+        group: dict[str, Any] = {"hooks": [entry]}
+        if matcher:
+            group["matcher"] = matcher
+        groups.append(group)
+        added.append(name)
+    if added:
+        ensure_safe(path.parent.parent, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    return added
+
+
 STATUSLINE = {"type": "command", "command": f"{SDD} statusline", "padding": 0}
 
 
@@ -158,4 +195,7 @@ def init_project(
         added = [rule.split(": ", 1)[1] for rule in rules if rule.startswith(f"{key}: ")]
         if added:
             done.append(f"permission rules ({labels[key]}): {', '.join(added)}")
+    hooks = _merge_hooks(root / ".claude" / "settings.json")
+    if hooks:
+        done.append(f"hooks (in .claude/settings.json): {', '.join(hooks)}")
     return done

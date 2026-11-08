@@ -397,3 +397,19 @@ def test_rerunning_init_keeps_relaxed_git_rules_but_restores_gates(tmp_path: Pat
     assert "Bash(git push:*)" not in after["ask"]  # the user's choice stays
     assert "Bash(bash .sdd/bin/sdd approve:*)" in after["ask"]  # the gate comes back
     assert set(DENY) <= set(after["deny"])
+
+
+# --- hooks live in project settings, not in the plugin ----------------------------
+
+
+def test_init_registers_hooks_in_project_settings_once(repo: Path) -> None:
+    from specsteward.init import PROJECT_HOOKS, init_project
+
+    init_project(repo)
+    init_project(repo)  # a re-run adds nothing twice
+    settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    commands = [
+        h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]
+    ]
+    assert len(commands) == len(PROJECT_HOOKS) == len(set(commands))
+    assert all(c.startswith('bash "$CLAUDE_PROJECT_DIR/.sdd/bin/sdd" hook-') for c in commands)
