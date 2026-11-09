@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 (2026-11-09)
+
+### Changed
+- `plugin.json` now holds only fields Claude Code recognises; the four listing-only links (documentation, support, privacy policy, terms) were removed. The same pages are still linked from the README and `homepage`.
+- README: the install section now covers the one-command install, updating, pinning a version and uninstalling.
+
 ## 0.3.2 (2026-11-08)
 
 ### Changed
