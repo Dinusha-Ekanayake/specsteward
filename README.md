@@ -93,8 +93,8 @@ Then run `/specsteward:init` in your project (see [Quick start](#quick-start)).
 
 | To | Run |
 |---|---|
-| Update | `claude plugin marketplace update specsteward`, then `claude plugin update specsteward@specsteward` |
-| Pin a release | `claude plugin marketplace add Dinusha-Ekanayake/specsteward@v0.3.3` |
+| Update | `claude plugin marketplace update specsteward`, then `claude plugin update specsteward@specsteward`, restart Claude Code, and run `/specsteward:init` once in each project (it removes the project-level hooks that 0.3.2 and 0.3.3 wrote, now that the plugin ships them) |
+| Pin a release | `claude plugin marketplace add Dinusha-Ekanayake/specsteward@v0.3.4` |
 | Remove | `claude plugin uninstall specsteward@specsteward` (project data stays; see [Uninstall](#uninstall)) |
 
 ## Quick start
@@ -114,7 +114,7 @@ Optional: `bash .sdd/bin/sdd init --statusline` shows the run in Claude Code's s
 Then:
 
 1. `/specsteward:run plan <topic>` drafts a spec (status `Draft`).
-2. Read it. Approve with `bash .sdd/bin/sdd approve 001 --start` (a permission prompt only you can answer), or reply `approve 001` from your phone.
+2. Read it. Switch to the spec's branch (`git checkout -b feature/001-<slug>`, or `fix/001-...` for a bug), then approve with `bash .sdd/bin/sdd approve 001 --start` (a permission prompt only you can answer), or reply `approve 001` from your phone. `--start` refuses to run on any other branch; plain `approve` works anywhere.
 3. `/specsteward:run 001` runs the tasks. It stops at the gates below.
 
 For a bug, `/specsteward:run fix "<what is broken>"` drafts a small fix spec instead: reproduction, expected and actual behaviour, root cause, and a failing regression test as the first task. It then goes through the same approval and run.
@@ -203,7 +203,7 @@ specsteward collects no telemetry and sends nothing anywhere by itself. Everythi
 ## Uninstall
 
 1. `/plugin uninstall specsteward@specsteward` (and `/plugin marketplace remove specsteward`).
-2. In each project: delete `.sdd/` and, if you no longer want them, `sdd.toml`, `specs/_template/`, `specs/constitution.md` and `.graphifyignore`; remove the `bash .sdd/bin/sdd` and `Edit(.sdd/**)` rules from `.claude/settings.json`.
+2. In each project: delete `.sdd/` and, if you no longer want them, `sdd.toml`, `specs/_template/`, `specs/constitution.md` `specs/_template_fix/`, `graphify-out/` and `.graphifyignore`, plus the specsteward lines `init` added to `.gitignore`; remove the `bash .sdd/bin/sdd` and `Edit(.sdd/**)` rules from `.claude/settings.json`, and the `git commit`, `git push`, `gh pr create` and `gh pr merge` ask rules if you do not want them.
 3. Delete `~/.claude/specsteward/` (trust store, install logs and, on Windows, the encrypted bot token).
 4. If you set up phone control: delete `claude-phone` (and `claude-phone.cmd` on Windows) next to `claude`, remove the token from the macOS Keychain (`security delete-generic-password -s specsteward.telegram`) or your Linux keyring (`secret-tool clear service specsteward.telegram`), and switch the plugin back on for every session with `claude plugin enable telegram@claude-plugins-official` if you want that.
 5. Optional, if specsteward installed them: `uv tool uninstall graphifyy` (or `pipx uninstall graphifyy`), and Bun with `brew uninstall bun`, `winget uninstall Oven-sh.Bun`, or by deleting `~/.bun`.
@@ -211,8 +211,10 @@ specsteward collects no telemetry and sends nothing anywhere by itself. Everythi
 ## Development
 
 ```bash
-python -m venv .venv && .venv/bin/pip install pytest pytest-cov ruff mypy
+python -m venv .venv
+.venv/bin/pip install pytest pytest-cov ruff mypy   # Windows: .venv/Scripts/pip
 bash scripts/sdd.sh init --preset python   # the repo uses itself
+bash .sdd/bin/sdd trust                    # asks you first; the repo ships its own sdd.toml
 bash .sdd/bin/sdd check
 ```
 

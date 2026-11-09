@@ -121,4 +121,6 @@ Briefs are capped (40 plan lines, 12 files, 25 names per file); anything cut is 
 
 `ask` wins over `allow`, so the gates always prompt. You may drop the `git` rules if you want commits without a prompt; `sdd doctor` will only warn. The `sdd` rules are the gates and `sdd doctor` fails without them.
 
+`init` also removes the seven project-level specsteward hooks that 0.3.2 and 0.3.3 wrote (the plugin ships them now); any other hook in the file is left alone.
+
 `sdd init --statusline` also adds the run to your status line in `.claude/settings.local.json` (an existing status line is kept; add `bash .sdd/bin/sdd statusline` to it yourself).

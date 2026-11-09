@@ -133,9 +133,14 @@ def scan_wording(root: Path, wording: Wording) -> StepResult:
     hits = []
     for top in wording.scan:
         for path in sorted((root / top).rglob("*")):
-            if path.suffix not in wording.suffixes or _SKIP_DIRS & set(path.parts):
+            if path.suffix not in wording.suffixes or _SKIP_DIRS & set(
+                path.relative_to(root).parts
+            ):
                 continue
-            text = path.read_text(encoding="utf-8", errors="replace")
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:  # a directory named like a source file, or a dangling symlink
+                continue
             for number, line in enumerate(text.splitlines(), start=1):
                 if wording.allow_marker in line:
                     continue

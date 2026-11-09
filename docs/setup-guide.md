@@ -124,7 +124,7 @@ creates `../<repo>-002` on the spec's branch. Open Claude Code there and run `/s
 
 ## Upgrading
 
-`/plugin marketplace update specsteward`, restart Claude Code, then run `/specsteward:init` once (it keeps your files and adds anything new) and `bash .sdd/bin/sdd doctor`. Read the [changelog](../CHANGELOG.md) for steps a release needs.
+`/plugin marketplace update specsteward`, then `/plugin update specsteward@specsteward`, restart Claude Code, then run `/specsteward:init` once (it keeps your files, adds anything new and removes the project-level hooks that 0.3.2 and 0.3.3 wrote, which the plugin now ships itself) and `bash .sdd/bin/sdd doctor`. Read the [changelog](../CHANGELOG.md) for steps a release needs.
 
 ## Uninstalling
 

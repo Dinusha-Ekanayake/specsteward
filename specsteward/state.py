@@ -37,7 +37,12 @@ def load(root: Path) -> State | None:
     path = root / STATE_FILE
     if not path.exists():
         return None
-    state: State = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        state: State = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(state, dict):
+        return None
     run_id = state.get("run_id")
     if not run_id or run_id != trust.current_run(root):
         return None
@@ -52,6 +57,7 @@ def save(root: Path, state: State) -> None:
     ensure_safe(root, path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")  # write then rename, so a crash never leaves half a file
+    ensure_safe(root, tmp)
     tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     write_dashboard(root, state)  # the read-only HTML view stays current

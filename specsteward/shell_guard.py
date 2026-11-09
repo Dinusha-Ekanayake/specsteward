@@ -92,11 +92,31 @@ def _gated_sdd(words: list[str]) -> str:
     return ""
 
 
+SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell"})
+
+
+def _nested(words: list[str]) -> str:
+    """The command string a nested shell (`bash -c "..."`) or `eval` runs, else ""."""
+    name = _name(words[0])
+    if name == "eval":
+        return " ".join(words[1:])
+    if name in SHELLS and "-c" in words[:-1]:
+        return words[words.index("-c") + 1]
+    return ""
+
+
 def _reason(command: str) -> str:
+    whole = _words(command.strip())
+    inner = _nested(whole) if whole else ""
+    if inner and inner != command and (found := _reason(inner)):
+        return found  # `bash -c '...; sdd approve'`: look inside before splitting on `;`
     for segment in SEGMENT.split(command):
         words = _words(segment.strip())
         if not words:
             continue
+        inner = _nested(words)
+        if inner and inner != command and (found := _reason(inner)):
+            return found
         gated = _gated_sdd(words)
         if gated:
             return f"`sdd {gated}` is a human gate; only the user may approve it"

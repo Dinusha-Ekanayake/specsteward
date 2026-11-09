@@ -1,6 +1,6 @@
 ---
 name: init
-description: Set up specsteward in the current repository - detects the stack and the project's own lint, type and test commands, writes sdd.toml, spec/plan/tasks templates, the .gitignore entry and permission rules (approve, trust, start, resume, commit, push and PR stay behind "ask"), then checks the setup with `sdd doctor`. Use for "/specsteward:init".
+description: Set up specsteward in the current repository - detects the stack and the project's own lint, type and test commands, writes sdd.toml, spec/plan/tasks templates, the .gitignore entry and permission rules (approve, trust, start, resume, signoff, commit, push, PR create and PR merge stay behind "ask"), then checks the setup with `sdd doctor`. Use for "/specsteward:init".
 ---
 
 # specsteward init
@@ -10,7 +10,9 @@ description: Set up specsteward in the current repository - detects the stack an
    It detects the stack (Python, Node, Go, Rust, or a Makefile) and builds the gate from
    what the project already uses. It never overwrites existing files without `--force`.
    Pass `--preset <name>` only if the user asks for a specific one.
-2. Run `bash .sdd/bin/sdd doctor` and fix every `FAIL` line with the user, using the fix
+2. If the init output says "removed project hooks", tell the user the plugin now supplies
+   those hooks and the project copies were duplicates (they ran every hook twice).
+   Run `bash .sdd/bin/sdd doctor` and fix every `FAIL` line with the user, using the fix
    it prints. If `sdd.toml` already existed, the user must review it and run
    `bash .sdd/bin/sdd trust` themselves (it is a permission prompt).
 3. Run `bash .sdd/bin/sdd check` once. If a step fails because of the project (not the

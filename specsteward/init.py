@@ -195,7 +195,9 @@ def init_project(
         if not trust.config_trusted(root):
             done.append(f"review {CONFIG_FILE}, then run `{SDD} trust` before the first check")
     else:
-        replacing = config.exists()
+        # A project the trust store already knows is never auto-trusted: otherwise deleting
+        # a tuned sdd.toml and running the allow-listed `init` would re-trust the weaker default.
+        replacing = config.exists() or trust.is_known(root)
         stack = detect_stack(root) if preset == "auto" else preset
         ensure_safe(root, config)
         config.write_text(render_config(root, stack, specs_dir), encoding="utf-8")

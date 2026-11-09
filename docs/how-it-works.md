@@ -12,7 +12,7 @@
 | `skills/run` | The orchestration loop and the phone command table |
 | `skills/init`, `skills/remote` | Setup helpers |
 | `specsteward/` | The deterministic part, as a standard-library Python CLI |
-| `hooks/hooks.json` | SessionStart (shim, context, background graph sync), PreToolUse (guard `.sdd/` and the trust store), PostToolUse (format), SubagentStop (count agents), Stop (continue) |
+| `hooks/hooks.json` | SessionStart (shim, context, background graph sync), PreToolUse (guard `.sdd/` and the trust store from file edits, and from shell commands that touch run state, the trust store or the gates), PostToolUse (format edited files; bind a started run to the session after a shell command), SubagentStop (count agents), Stop (continue) |
 
 Everything that can be a script is a script, so models spend tokens only on judgement: the CLI parses tasks, builds briefs, runs the gate, counts failures, enforces caps, keeps the code graph fresh and renders the status line and dashboard.
 

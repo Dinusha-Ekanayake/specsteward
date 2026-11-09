@@ -21,5 +21,6 @@ bash .sdd/bin/sdd check                                 # lint, format, types, t
   `uv pip freeze` of its tool environment into the constraints file. CI installs the lock on
   every OS.
 - Releases: bump `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and `pyproject.toml` together and date the
-  `CHANGELOG.md` section; a test checks that they agree.
+  `CHANGELOG.md` section; a test checks that they agree. Also update the pinned-version
+  example in the README's install section.
 - Changing an agent or skill prompt? Say what failure it fixes and, if possible, add a unit test for the script side.

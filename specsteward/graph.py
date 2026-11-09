@@ -9,6 +9,7 @@ Building the code graph is local and costs no model tokens.
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -104,7 +105,7 @@ def install_commands(version: str) -> list[list[str]]:
     if shutil.which("uv"):
         commands.append(["uv", "tool", "install", spec, *lock])
     if shutil.which("pipx"):
-        pip_args = [f"--pip-args=-c {CONSTRAINTS}"] if pinned else []
+        pip_args = [f"--pip-args=-c {shlex.quote(CONSTRAINTS.as_posix())}"] if pinned else []
         commands.append(["pipx", "install", spec, *pip_args])
     # -I: isolated mode, so nothing from the working directory or PYTHON* variables is used.
     commands.append(

@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -234,7 +235,7 @@ def test_installs_use_the_exact_dependency_lock(monkeypatch: pytest.MonkeyPatch)
     )
     uv, pipx, pip = graph.install_commands(GRAPHIFY_VERSION)
     assert uv[-2:] == ["-c", str(graph.CONSTRAINTS)]
-    assert pipx[-1] == f"--pip-args=-c {graph.CONSTRAINTS}"
+    assert pipx[-1] == f"--pip-args=-c {shlex.quote(graph.CONSTRAINTS.as_posix())}"
     assert pip[-2:] == ["-c", str(graph.CONSTRAINTS)]
     other = graph.install_commands("9.9.9")  # a version chosen in sdd.toml: no lock
     assert all("-c" not in cmd for cmd in other)

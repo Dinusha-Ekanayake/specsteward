@@ -183,12 +183,18 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
     groups = raw.get("groups", {})
     brief = raw.get("brief", {})
     graph = raw.get("graphify", {})
+    status_regex = str(project.get("status_regex", Config.status_regex))
+    _regex(status_regex, "[project] status_regex")
+    if re.compile(status_regex).groups < 2:
+        raise ValueError(
+            "[project] status_regex needs two groups: (prefix)(status text), as the default has"
+        )
     return Config(
         root=root,
         specs_dir=str(project.get("specs_dir", "specs")),
         branch_prefix=str(project.get("branch_prefix", "feature/{spec}-")),
         fix_branch_prefix=str(project.get("fix_branch_prefix", "fix/{spec}-")),
-        status_regex=str(project.get("status_regex", Config.status_regex)),
+        status_regex=status_regex,
         approved_word=str(project.get("approved_word", "Approved")),
         check=_steps(raw.get("check", [])),
         format_cmds={

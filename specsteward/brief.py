@@ -199,8 +199,9 @@ def build_brief(cfg: Config, spec_dir: Path, task_ids: list[str], sdd: str = "sd
 
 
 def write_brief(cfg: Config, spec_dir: Path, task_ids: list[str], sdd: str = "sdd") -> Path:
+    text = build_brief(cfg, spec_dir, task_ids, sdd)  # rejects unknown ids before any write
     path = cfg.root / BRIEF_DIR / f"{task_ids[0]}.md"
     ensure_safe(cfg.root, path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(build_brief(cfg, spec_dir, task_ids, sdd), encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
     return path
