@@ -82,6 +82,21 @@ Day to day you use three things: `/specsteward:run plan <topic>`, approve, and `
 
 Or from a local clone: `/plugin marketplace add /path/to/specsteward`.
 
+From a shell instead of inside Claude Code:
+
+```bash
+claude plugin marketplace add Dinusha-Ekanayake/specsteward
+claude plugin install specsteward@specsteward
+```
+
+Then run `/specsteward:init` in your project (see [Quick start](#quick-start)).
+
+| To | Run |
+|---|---|
+| Update | `claude plugin marketplace update specsteward`, then `claude plugin update specsteward@specsteward` |
+| Pin a release | `claude plugin marketplace add Dinusha-Ekanayake/specsteward@v0.3.3` |
+| Remove | `claude plugin uninstall specsteward@specsteward` (project data stays; see [Uninstall](#uninstall)) |
+
 ## Quick start
 
 The full walkthrough is the **[setup guide](docs/setup-guide.md)**; if anything goes wrong, see the **[FAQ and troubleshooting](docs/faq.md)**. The short version:
