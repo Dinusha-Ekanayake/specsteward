@@ -1,9 +1,16 @@
 # Security model
 
+## Known limits
+
+- The risk-based review requirement is honour-based: `sdd review <task> clean` is not a gate, so an agent could record a clean review itself. Approval, trust, start, resume and sign-off are the tamper-proof gates.
+- `.sdd/state.json` is updated without a file lock; hooks and the CLI rarely run at the same moment, but a lost update is possible in principle.
+- Trust and approvals are keyed by the git repository, so two sdd projects in one repository share them.
+
 ## What specsteward can do
 
 - Runs the commands in `sdd.toml` (`[[check]]`, `[format]`) from the repository root, **only after you have trusted that exact file** with `sdd trust`.
 - Edits files in your project through Claude Code's normal tools and permissions.
+- Ships its hooks with the plugin (`hooks/hooks.json`), so they run in every project that has an `sdd.toml` and do nothing elsewhere. `/specsteward:init` removes the project-level copies that 0.3.2 and 0.3.3 wrote, and never touches other hooks.
 - Writes `.sdd/` (git-ignored), merges permission rules into `.claude/settings.json`, and keeps a trust store in `~/.claude/specsteward/trust.json` (or `$SDD_HOME`).
 - With `[graphify] auto = true` (the default) and a **trusted** `sdd.toml`, installs a pinned version of the `graphifyy` package with `uv tool`, `pipx` or `pip --user` (run from your home directory, in isolated mode), and builds a local code graph in `graphify-out/`. Set `auto = false` to turn this off.
 

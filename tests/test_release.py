@@ -22,7 +22,12 @@ def test_versions_agree() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     top = re.search(r"^## (\d+\.\d+\.\d+)", changelog, re.MULTILINE)
     assert top is not None
+    marketplace = json.loads(
+        (ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    listed = {entry["version"] for entry in marketplace["plugins"]}
     assert plugin["version"] == package["project"]["version"] == top.group(1)
+    assert listed == {plugin["version"]}
 
 
 def test_generated_config_follows_the_plugins_graphify_pin(tmp_path: Path) -> None:

@@ -16,7 +16,7 @@ import os
 import subprocess
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -122,6 +122,12 @@ def _retrying(action: Callable[[], T]) -> T:
             time.sleep(0.02)
 
 
+def _keep_corrupt_copy(path: Path, text: str) -> None:
+    """The store reads as empty (every approval is asked again); keep what was there."""
+    with suppress(OSError):  # best effort: the fail-closed reset still applies
+        path.with_name(path.name + ".corrupt").write_text(text, encoding="utf-8")
+
+
 def _load() -> dict[str, Any]:
     """The store; empty only when it does not exist yet or is not valid JSON.
 
@@ -138,6 +144,7 @@ def _load() -> dict[str, Any]:
     try:
         data = json.loads(text)
     except ValueError:
+        _keep_corrupt_copy(path, text)
         return {"projects": {}}
     if not isinstance(data, dict) or not isinstance(data.get("projects", {}), dict):
         return {"projects": {}}
@@ -200,6 +207,11 @@ def _trusted_configs(entry: dict[str, Any]) -> list[str]:
     configs = [str(c) for c in entry.get("configs", [])]
     legacy = entry.get("config")  # 0.2.0 development builds kept a single hash
     return [*configs, str(legacy)] if legacy and str(legacy) not in configs else configs
+
+
+def is_known(root: Path) -> bool:
+    """True when this repository already has a record (trusted file, approval or run)."""
+    return bool(_read(repo_root(root)))
 
 
 def trust_config(root: Path) -> str:

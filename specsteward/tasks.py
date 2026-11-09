@@ -13,7 +13,8 @@ from specsteward.config import RISKS
 TODO, DONE, HUMAN = "[ ]", "[x]", "[?]"
 STATUSES = (TODO, DONE, HUMAN)
 
-_ROW = re.compile(r"^\|\s*(T-\d{3}-\d{2})\s*\|")
+_ROW = re.compile(r"^\|\s*(T-\d{3}-\d{2,})\s*\|")
+_HEADER = re.compile(r"^\|\s*id\s*\|", re.IGNORECASE)
 _STATUS_CELL = re.compile(r"\[[ x?]\]\s*\|\s*$")
 
 
@@ -53,11 +54,13 @@ def parse_tasks(path: Path) -> list[Task]:
     header: list[str] = []
     tasks = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("| ID"):
+        if _HEADER.match(line):
             header = [cell.lower() for cell in _cells(line)]
             continue
         if not _ROW.match(line):
             continue
+        if not header:
+            raise ValueError(f"{path}: a task row comes before the `| ID | ... |` header row")
         row = dict(zip(header, _cells(line), strict=False))
         risk = row.get("risk", "low") or "low"
         if risk not in RISKS:

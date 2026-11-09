@@ -14,13 +14,20 @@ from pathlib import Path
 # state, the code graph, environments, and files that tools regenerate when tests run.
 SKIP_DIRS = {".git", ".sdd", ".venv", "venv", "node_modules", "__pycache__", "graphify-out"}
 SKIP_DIRS |= {".mypy_cache", ".pytest_cache", ".ruff_cache", ".hypothesis", ".tox", ".nox"}
-SKIP_DIRS |= {"htmlcov", "coverage", ".nyc_output", "dist", "build", "target", ".next", "out"}
+# Build output is only skipped at the top level (as the git pathspec below does): a source
+# package that happens to be called `out` or `coverage` deeper down is part of the fingerprint.
+TOP_LEVEL_SKIP = {"htmlcov", "coverage", ".nyc_output", "dist", "build", "target", ".next", "out"}
 SKIP_FILES = {".coverage", "coverage.xml", ".graphifyignore", ".DS_Store"}
 
 
 def _skipped(rel: str, excluded: set[str]) -> bool:
     parts = rel.split("/")
-    return rel in excluded or parts[-1] in SKIP_FILES or bool(SKIP_DIRS & set(parts[:-1]))
+    return (
+        rel in excluded
+        or parts[-1] in SKIP_FILES
+        or bool(SKIP_DIRS & set(parts[:-1]))
+        or (len(parts) > 1 and parts[0] in TOP_LEVEL_SKIP)
+    )
 
 
 def _git(root: Path, *args: str) -> bytes | None:
@@ -45,7 +52,7 @@ def fingerprint(root: Path, exclude: tuple[str, ...] = ()) -> str:
     """sha256 of the uncommitted state of ``root``; ``exclude`` lists relative paths."""
     digest = hashlib.sha256()
     excluded = set(exclude)
-    skip = [f":(exclude){name}" for name in sorted(SKIP_DIRS | SKIP_FILES)]
+    skip = [f":(exclude){name}" for name in sorted(SKIP_DIRS | TOP_LEVEL_SKIP | SKIP_FILES)]
     pathspec = [".", *(f":(exclude){rel}" for rel in exclude), *skip]
     diff = _git(root, "diff", "HEAD", "--binary", "--", *pathspec)
     listing = ["ls-files", "--others", "--exclude-standard", "-z", "--", *pathspec]

@@ -11,7 +11,7 @@ from specsteward import config as cfg_mod
 from specsteward import graph, phone, prereqs, secret_store, trust, wizard
 from specsteward.check import resolve_cmd
 from specsteward.hooks import SHIM
-from specsteward.init import ASK, DENY
+from specsteward.init import ASK, DENY, legacy_hook_commands
 from specsteward.remote import CHANNELS, channel_status, configured, running_servers, state_dir
 from specsteward.state import current_branch
 
@@ -77,6 +77,21 @@ def _settings(root: Path) -> list[dict[str, Any]]:
         except (OSError, ValueError):
             continue
     return out
+
+
+def _duplicate_hooks(root: Path) -> list[Finding]:
+    """Hooks that releases 0.3.2 wrote into the project now come from the plugin."""
+    names = sorted({c for s in _settings(root) for c in legacy_hook_commands(s)})
+    if not names:
+        return []
+    return [
+        Finding(
+            WARN,
+            f"{len(names)} specsteward hooks are in .claude/settings.json and in the plugin, "
+            "so each runs twice",
+            "run `/specsteward:init` once to remove the project copies",
+        )
+    ]
 
 
 def _permissions(root: Path) -> list[Finding]:
@@ -223,6 +238,7 @@ def run_doctor(start: Path, extra: list[Finding] | None = None) -> list[Finding]
     found.append(_git(cfg.root))
     found += _checks(cfg)
     found += _permissions(cfg.root)
+    found += _duplicate_hooks(cfg.root)
     found += _install(cfg.root)
     found.append(_graph(cfg))
     found += extra or []

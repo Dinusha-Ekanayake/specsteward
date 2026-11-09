@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.4 (2026-11-10)
+
+### Changed
+- The plugin ships its hooks again (`hooks/hooks.json`), so installing the plugin is enough: the guards, formatter, agent counter and session start work in every initialised project with no per-project hook setup, and they update with the plugin. Version 0.3.2 had moved them into each project's `.claude/settings.json`.
+- `/specsteward:init` no longer writes hooks. It removes the exact seven specsteward hook entries that 0.3.2 wrote, and leaves every other hook and setting alone. Projects set up with 0.3.2 or 0.3.3: update the plugin, run `/specsteward:init` once, and restart Claude Code.
+
+### Fixed
+- `sdd init` no longer re-trusts a freshly written `sdd.toml` in a project the trust store already knows, so deleting a tuned config and running the allow-listed `init` cannot swap in the weaker default unnoticed.
+- The shell guard now looks inside `bash -c "..."`, `sh -c`, and `eval` strings for gated `sdd` commands.
+- The wording scan no longer skips every file when the project's own path contains a folder named `build` or `dist`, and no longer crashes on a directory or dangling link named like a source file.
+- The change fingerprint now includes source packages named `out`, `coverage`, `dist` and so on below the top level; only top-level build output is skipped.
+- A corrupt trust store is copied to `trust.json.corrupt` before it is reset, instead of being silently overwritten.
+- `.sdd/state.tmp` gets the same symlink check as `state.json`; a malformed `state.json` means "no run" instead of a traceback.
+- Task tables accept a lower-case `| id |` header and three-digit task numbers; a task row before the header, an invalid `status_regex`, and an unknown task id in `sdd brief` give clear errors (the last creates no directories).
+- The pipx constraints path is quoted, so install paths with spaces work.
+- Docs: the quick start says to switch to the spec's branch before `approve --start`; upgrade steps, permission rules, hook descriptions and uninstall steps now match the code.
+
+### Added
+- `sdd doctor` warns when those older project hooks are still present next to the plugin's, because each hook would run twice (and each agent would be counted twice).
+
 ## 0.3.3 (2026-11-09)
 
 ### Changed
@@ -9,7 +29,7 @@
 ## 0.3.2 (2026-11-08)
 
 ### Changed
-- The plugin no longer declares hooks: the directory accepts command hooks only from Verified organizations. `/specsteward:init` now writes the same hooks into the project's `.claude/settings.json` (calling `.sdd/bin/sdd`). Projects set up with an earlier version must re-run `/specsteward:init` once, and restart Claude Code, to get the guards back.
+- *(Superseded in 0.3.4: the plugin ships its hooks again.)* The plugin no longer declares hooks: the directory accepts command hooks only from Verified organizations. `/specsteward:init` now writes the same hooks into the project's `.claude/settings.json` (calling `.sdd/bin/sdd`). Projects set up with an earlier version must re-run `/specsteward:init` once, and restart Claude Code, to get the guards back.
 
 ## 0.3.1 (2026-11-05)
 

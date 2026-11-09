@@ -50,7 +50,7 @@ It:
 
 1. **`sdd.toml`**: the `[[check]]` commands are your quality gate. Every task must pass them. Make sure they run your real lint, type checks and tests. If you change the file, run `bash .sdd/bin/sdd trust` afterwards (it asks you first).
 2. **`specs/constitution.md`**: replace the examples with the rules your project must always follow, written as `- ... MUST ...` or `- NEVER ...`. They go into every brief, and a reviewer treats a violation as critical.
-3. **`.claude/settings.json`**: has the gates as `ask` rules (approve, trust, start, resume, commit, push, PR). Leave them; you may remove `git commit` from `ask` if you want commits without a prompt.
+3. **`.claude/settings.json`**: has the gates as `ask` rules (approve, trust, start, resume, signoff, commit, push, PR). Leave them; you may remove `git commit` from `ask` if you want commits without a prompt.
 
 Then run:
 
@@ -124,7 +124,7 @@ creates `../<repo>-002` on the spec's branch. Open Claude Code there and run `/s
 
 ## Upgrading
 
-`/plugin marketplace update specsteward`, restart Claude Code, then run `/specsteward:init` once (it keeps your files and adds anything new) and `bash .sdd/bin/sdd doctor`. Read the [changelog](../CHANGELOG.md) for steps a release needs.
+`/plugin marketplace update specsteward`, then `/plugin update specsteward@specsteward`, restart Claude Code, then run `/specsteward:init` once (it keeps your files, adds anything new and removes the project-level hooks that 0.3.2 and 0.3.3 wrote, which the plugin now ships itself) and `bash .sdd/bin/sdd doctor`. Read the [changelog](../CHANGELOG.md) for steps a release needs.
 
 ## Uninstalling
 

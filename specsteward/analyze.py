@@ -32,7 +32,7 @@ def without_comments(text: str) -> str:
     return COMMENT.sub(lambda match: "\n" * match.group().count("\n"), text)
 
 
-ROW = re.compile(r"^\|\s*T-\d{3}-\d{2}\s*\|")
+ROW = re.compile(r"^\|\s*T-\d{3}-\d{2,}\s*\|")
 
 
 @dataclass(frozen=True)

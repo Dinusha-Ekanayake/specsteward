@@ -82,41 +82,79 @@ def _merge_settings(path: Path) -> list[str]:
     return added
 
 
-# The plugin declares no hooks (the plugin directory refuses command hooks), so `init`
-# registers them in the project's own settings, where the user owns and can review them.
-HOOK_RUNNER = 'bash "$CLAUDE_PROJECT_DIR/.sdd/bin/sdd"'
-PROJECT_HOOKS: tuple[tuple[str, str, str, int], ...] = (
-    ("SessionStart", "", "hook-session-start", 30),
-    ("PreToolUse", "Edit|Write|MultiEdit|NotebookEdit", "hook-guard", 30),
-    ("PreToolUse", "Bash", "hook-shell-guard", 30),
-    ("PostToolUse", "Edit|Write|MultiEdit", "hook-format", 60),
-    ("PostToolUse", "Bash", "hook-bind", 30),
-    ("Stop", "", "hook-stop", 30),
-    ("SubagentStop", "", "hook-subagent-stop", 30),
+# The plugin declares its own hooks (hooks/hooks.json). Releases 0.3.2 wrote the same hooks
+# into the project's settings; a project still carrying them would run every hook twice
+# (and count each agent twice), so `init` removes those older entries.
+LEGACY_HOOK_PREFIX = 'bash "$CLAUDE_PROJECT_DIR/.sdd/bin/sdd" hook-'
+LEGACY_HOOKS = frozenset(
+    f"{LEGACY_HOOK_PREFIX}{name}"
+    for name in (
+        "session-start",
+        "guard",
+        "shell-guard",
+        "format",
+        "bind",
+        "stop",
+        "subagent-stop",
+    )
 )
 
 
-def _merge_hooks(path: Path) -> list[str]:
-    """Add the specsteward hooks to a settings file; hooks already there are kept."""
-    settings: dict[str, Any] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    hooks = settings.setdefault("hooks", {})
-    added = []
-    for event, matcher, name, timeout in PROJECT_HOOKS:
-        command = f"{HOOK_RUNNER} {name}"
-        groups = hooks.setdefault(event, [])
-        if any(h.get("command") == command for g in groups for h in g.get("hooks", [])):
+def _is_legacy(hook: Any) -> bool:
+    return isinstance(hook, dict) and hook.get("command") in LEGACY_HOOKS
+
+
+def legacy_hook_commands(settings: Any) -> list[str]:
+    """The 0.3.2 project-level specsteward hook commands found in a parsed settings file."""
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return []
+    return [
+        str(hook["command"])
+        for groups in hooks.values()
+        if isinstance(groups, list)
+        for group in groups
+        if isinstance(group, dict) and isinstance(group.get("hooks"), list)
+        for hook in group["hooks"]
+        if _is_legacy(hook)
+    ]
+
+
+def _without_legacy(groups: list[Any]) -> list[Any]:
+    kept_groups = []
+    for group in groups:
+        entries = group.get("hooks") if isinstance(group, dict) else None
+        if not isinstance(entries, list) or not any(_is_legacy(h) for h in entries):
+            kept_groups.append(group)  # not ours: leave exactly as the user wrote it
             continue
-        entry = {"type": "command", "command": command, "timeout": timeout}
-        group: dict[str, Any] = {"hooks": [entry]}
-        if matcher:
-            group["matcher"] = matcher
-        groups.append(group)
-        added.append(name)
-    if added:
-        ensure_safe(path.parent.parent, path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    return added
+        kept = [h for h in entries if not _is_legacy(h)]
+        if kept:
+            kept_groups.append({**group, "hooks": kept})
+    return kept_groups
+
+
+def _drop_legacy_project_hooks(path: Path) -> list[str]:
+    """Remove the 0.3.2 project-level specsteward hooks; anything else is left untouched."""
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []  # missing or unreadable: nothing of ours to remove
+    removed = legacy_hook_commands(settings)
+    if not removed:
+        return []
+    hooks = settings["hooks"]
+    for event, groups in list(hooks.items()):
+        if isinstance(groups, list):
+            kept_groups = _without_legacy(groups)
+            if kept_groups:
+                hooks[event] = kept_groups
+            elif len(kept_groups) != len(groups):
+                del hooks[event]
+    if not hooks:
+        del settings["hooks"]
+    ensure_safe(path.parent.parent, path)
+    path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    return [command.removeprefix(LEGACY_HOOK_PREFIX) for command in removed]
 
 
 STATUSLINE = {"type": "command", "command": f"{SDD} statusline", "padding": 0}
@@ -157,7 +195,9 @@ def init_project(
         if not trust.config_trusted(root):
             done.append(f"review {CONFIG_FILE}, then run `{SDD} trust` before the first check")
     else:
-        replacing = config.exists()
+        # A project the trust store already knows is never auto-trusted: otherwise deleting
+        # a tuned sdd.toml and running the allow-listed `init` would re-trust the weaker default.
+        replacing = config.exists() or trust.is_known(root)
         stack = detect_stack(root) if preset == "auto" else preset
         ensure_safe(root, config)
         config.write_text(render_config(root, stack, specs_dir), encoding="utf-8")
@@ -195,7 +235,7 @@ def init_project(
         added = [rule.split(": ", 1)[1] for rule in rules if rule.startswith(f"{key}: ")]
         if added:
             done.append(f"permission rules ({labels[key]}): {', '.join(added)}")
-    hooks = _merge_hooks(root / ".claude" / "settings.json")
-    if hooks:
-        done.append(f"hooks (in .claude/settings.json): {', '.join(hooks)}")
+    legacy = _drop_legacy_project_hooks(root / ".claude" / "settings.json")
+    if legacy:
+        done.append(f"removed project hooks the plugin now provides: {', '.join(legacy)}")
     return done

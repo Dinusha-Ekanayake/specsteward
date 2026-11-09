@@ -50,4 +50,4 @@ Questions about privacy: open an issue at
 https://github.com/Dinusha-Ekanayake/specsteward/issues, or report a security problem
 privately through [SECURITY.md](SECURITY.md).
 
-Last updated: 2026-11-05.
+Last updated: 2026-11-10.

@@ -58,7 +58,10 @@ specsteward has no telemetry. Your code goes to Claude as in any Claude Code ses
 Yes, one per git worktree: `bash .sdd/bin/sdd worktree 005`.
 
 **Why so many permission prompts?**
-Only the gates prompt: approving a spec, trusting `sdd.toml`, starting or resuming a run (they reset counters), commit, push and PR. Everything else is allowed. The prompts are the guarantee that an agent cannot approve its own work.
+Only the gates prompt: approving a spec, trusting `sdd.toml`, starting or resuming a run (they reset counters), commit, push and PR. Other shell commands (your test runner, `graphify`) prompt too unless you allow them in `.claude/settings.json`; `init` pre-allows only `bash .sdd/bin/sdd` and a few read-only `git` commands. The gate prompts are the guarantee that an agent cannot approve its own work.
+
+**`sdd doctor` says specsteward hooks are in `.claude/settings.json` and in the plugin.**
+Releases 0.3.2 and 0.3.3 wrote the hooks into each project; the plugin now ships them, so each would run twice. Run `/specsteward:init` once in the project (it removes only those seven entries) and restart Claude Code.
 
 **Claude says it cannot edit `.claude/settings.json`.**
 By design: in a specsteward project, file tools may not change the permission rules that make the gates. Edit the file yourself or use `/config`.
