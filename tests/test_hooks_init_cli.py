@@ -399,17 +399,105 @@ def test_rerunning_init_keeps_relaxed_git_rules_but_restores_gates(tmp_path: Pat
     assert set(DENY) <= set(after["deny"])
 
 
-# --- hooks live in project settings, not in the plugin ----------------------------
+# --- hooks come from the plugin; 0.3.2's project-level copies are removed -------------
 
 
-def test_init_registers_hooks_in_project_settings_once(repo: Path) -> None:
-    from specsteward.init import PROJECT_HOOKS, init_project
+def test_init_removes_legacy_project_hooks_and_keeps_others(repo: Path) -> None:
+    from specsteward.init import LEGACY_HOOK_PREFIX, init_project
+
+    legacy = {"type": "command", "command": f"{LEGACY_HOOK_PREFIX}guard", "timeout": 30}
+    mine = {"type": "command", "command": "echo mine"}
+    settings = repo / ".claude" / "settings.json"
+    settings.parent.mkdir(exist_ok=True)
+    settings.write_text(
+        json.dumps(
+            {"hooks": {"Stop": [{"hooks": [legacy, mine]}], "SessionStart": [{"hooks": [legacy]}]}}
+        ),
+        encoding="utf-8",
+    )
+    init_project(repo)
+    after = json.loads(settings.read_text(encoding="utf-8"))["hooks"]
+    assert after == {"Stop": [{"hooks": [mine]}]}
+    init_project(repo)  # idempotent
+    assert json.loads(settings.read_text(encoding="utf-8"))["hooks"] == after
+
+
+def test_init_writes_no_hooks_of_its_own(repo: Path) -> None:
+    from specsteward.init import init_project
 
     init_project(repo)
-    init_project(repo)  # a re-run adds nothing twice
     settings = json.loads((repo / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    commands = [
-        h["command"] for groups in settings["hooks"].values() for g in groups for h in g["hooks"]
-    ]
-    assert len(commands) == len(PROJECT_HOOKS) == len(set(commands))
-    assert all(c.startswith('bash "$CLAUDE_PROJECT_DIR/.sdd/bin/sdd" hook-') for c in commands)
+    assert "hooks" not in settings
+
+
+def _legacy(name: str) -> dict[str, object]:
+    from specsteward.init import LEGACY_HOOK_PREFIX
+
+    return {"type": "command", "command": f"{LEGACY_HOOK_PREFIX}{name}", "timeout": 30}
+
+
+def test_legacy_removal_keeps_other_settings_and_untouched_groups(repo: Path) -> None:
+    from specsteward.init import LEGACY_HOOK_PREFIX, init_project
+
+    settings = repo / ".claude" / "settings.json"
+    settings.parent.mkdir(exist_ok=True)
+    matcher_only = {"matcher": "Bash"}
+    empty_hooks = {"matcher": "Edit", "hooks": []}
+    custom = {"hooks": [{"type": "command", "command": f"{LEGACY_HOOK_PREFIX}mine"}]}
+    pre = [matcher_only, empty_hooks, custom, {"hooks": [_legacy("guard")]}]
+    settings.write_text(
+        json.dumps(
+            {
+                "model": "sonnet",
+                "hooks": {
+                    "SessionStart": [{"hooks": [_legacy("session-start")]}],
+                    "PreToolUse": pre,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    init_project(repo)
+    after = json.loads(settings.read_text(encoding="utf-8"))
+    assert after["model"] == "sonnet"
+    assert "SessionStart" not in after["hooks"]
+    assert after["hooks"]["PreToolUse"] == [matcher_only, empty_hooks, custom]
+
+
+def test_only_legacy_hooks_leaves_no_hooks_key(repo: Path) -> None:
+    from specsteward.init import init_project
+
+    settings = repo / ".claude" / "settings.json"
+    settings.parent.mkdir(exist_ok=True)
+    settings.write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [_legacy("stop")]}]}, "env": {"A": "1"}}),
+        encoding="utf-8",
+    )
+    done = init_project(repo)
+    after = json.loads(settings.read_text(encoding="utf-8"))
+    assert "hooks" not in after and after["env"] == {"A": "1"}
+    assert any("removed project hooks" in line and "stop" in line for line in done)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['{"hooks": {"Stop": {"a": 1}}}', '{"hooks": {"Stop": ["x"]}}', "[]", '{"hooks": 5}'],
+)
+def test_malformed_hook_settings_never_crash_init(repo: Path, raw: str) -> None:
+    from specsteward.init import _drop_legacy_project_hooks
+
+    settings = repo / ".claude" / "settings.json"
+    settings.parent.mkdir(exist_ok=True)
+    settings.write_text(raw, encoding="utf-8")
+    assert _drop_legacy_project_hooks(settings) == []
+    assert settings.read_text(encoding="utf-8") == raw  # left exactly as it was
+
+
+def test_unparsable_settings_are_left_alone(repo: Path) -> None:
+    from specsteward.init import _drop_legacy_project_hooks
+
+    settings = repo / ".claude" / "settings.json"
+    settings.parent.mkdir(exist_ok=True)
+    settings.write_text("{not json", encoding="utf-8")
+    assert _drop_legacy_project_hooks(settings) == []
+    assert _drop_legacy_project_hooks(repo / "absent.json") == []

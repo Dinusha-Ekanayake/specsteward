@@ -1,6 +1,6 @@
 [project]
 name = "specsteward"
-version = "0.3.3"
+version = "0.3.4"
 description = "Spec-driven development on autopilot for Claude Code"
 readme = "README.md"
 license = { text = "MIT" }

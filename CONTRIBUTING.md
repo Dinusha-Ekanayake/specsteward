@@ -20,6 +20,6 @@ bash .sdd/bin/sdd check                                 # lint, format, types, t
   and `install.ps1` at the new tag; for graphify, install the new version with uv and write
   `uv pip freeze` of its tool environment into the constraints file. CI installs the lock on
   every OS.
-- Releases: bump `.claude-plugin/plugin.json` and `pyproject.toml` together and date the
+- Releases: bump `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and `pyproject.toml` together and date the
   `CHANGELOG.md` section; a test checks that they agree.
 - Changing an agent or skill prompt? Say what failure it fixes and, if possible, add a unit test for the script side.

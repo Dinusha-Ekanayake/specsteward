@@ -38,9 +38,20 @@ jobs:
         run: |
           python - <<'PY'
           import json, pathlib
-          for f in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"):
+          for f in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "hooks/hooks.json"):
               json.loads(pathlib.Path(f).read_text())
           PY
+          python - <<'PY'
+          import json, pathlib
+          hooks = json.loads(pathlib.Path("hooks/hooks.json").read_text())["hooks"]
+          for groups in hooks.values():
+              for group in groups:
+                  for hook in group["hooks"]:
+                      script = hook["args"][0].replace("${CLAUDE_PLUGIN_ROOT}/", "")
+                      assert pathlib.Path(script).is_file(), f"missing hook script: {script}"
+          PY
+          for f in scripts/hooks/*.sh; do bash -n "$f"; done
+          test -z "$(git ls-files -s scripts | grep '\.sh$' | grep -v '^100755')"  # executable in git
           test -x scripts/sdd.sh
           bash -n scripts/sdd.sh
           test ! -e bin  # a plugin with bin/ is refused by claude.ai and Cowork

@@ -50,7 +50,7 @@ It:
 
 1. **`sdd.toml`**: the `[[check]]` commands are your quality gate. Every task must pass them. Make sure they run your real lint, type checks and tests. If you change the file, run `bash .sdd/bin/sdd trust` afterwards (it asks you first).
 2. **`specs/constitution.md`**: replace the examples with the rules your project must always follow, written as `- ... MUST ...` or `- NEVER ...`. They go into every brief, and a reviewer treats a violation as critical.
-3. **`.claude/settings.json`**: has the gates as `ask` rules (approve, trust, start, resume, commit, push, PR). Leave them; you may remove `git commit` from `ask` if you want commits without a prompt.
+3. **`.claude/settings.json`**: has the gates as `ask` rules (approve, trust, start, resume, signoff, commit, push, PR). Leave them; you may remove `git commit` from `ask` if you want commits without a prompt.
 
 Then run:
 

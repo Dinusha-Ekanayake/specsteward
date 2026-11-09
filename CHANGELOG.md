@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.4 (2026-11-10)
+
+### Changed
+- The plugin ships its hooks again (`hooks/hooks.json`), so installing the plugin is enough: the guards, formatter, agent counter and session start work in every initialised project with no per-project hook setup, and they update with the plugin. Version 0.3.2 had moved them into each project's `.claude/settings.json`.
+- `/specsteward:init` no longer writes hooks. It removes the exact seven specsteward hook entries that 0.3.2 wrote, and leaves every other hook and setting alone. Projects set up with 0.3.2 or 0.3.3: update the plugin, run `/specsteward:init` once, and restart Claude Code.
+
+### Added
+- `sdd doctor` warns when those older project hooks are still present next to the plugin's, because each hook would run twice (and each agent would be counted twice).
+
 ## 0.3.3 (2026-11-09)
 
 ### Changed
@@ -9,7 +18,7 @@
 ## 0.3.2 (2026-11-08)
 
 ### Changed
-- The plugin no longer declares hooks: the directory accepts command hooks only from Verified organizations. `/specsteward:init` now writes the same hooks into the project's `.claude/settings.json` (calling `.sdd/bin/sdd`). Projects set up with an earlier version must re-run `/specsteward:init` once, and restart Claude Code, to get the guards back.
+- *(Superseded in 0.3.4: the plugin ships its hooks again.)* The plugin no longer declares hooks: the directory accepts command hooks only from Verified organizations. `/specsteward:init` now writes the same hooks into the project's `.claude/settings.json` (calling `.sdd/bin/sdd`). Projects set up with an earlier version must re-run `/specsteward:init` once, and restart Claude Code, to get the guards back.
 
 ## 0.3.1 (2026-11-05)
 

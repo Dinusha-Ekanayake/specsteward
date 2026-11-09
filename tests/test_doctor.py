@@ -140,3 +140,17 @@ def test_missing_deny_rules_are_named(tmp_path: Path) -> None:
     whats = [f.what for f in run_doctor(tmp_path) if f.what.startswith("deny rules missing")]
     assert len(whats) == 1 and "Edit(.claude/settings.json)" in whats[0]
     assert "Edit(.sdd/**)" not in whats[0]
+
+
+def test_doctor_warns_when_hooks_run_twice(tmp_path: Path) -> None:
+    from specsteward.init import LEGACY_HOOK_PREFIX
+
+    init_project(tmp_path, "generic")
+    assert not any("runs twice" in item.what for item in run_doctor(tmp_path))
+    settings = tmp_path / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    hook = {"type": "command", "command": f"{LEGACY_HOOK_PREFIX}stop"}
+    data["hooks"] = {"Stop": [{"hooks": [hook]}]}
+    settings.write_text(json.dumps(data), encoding="utf-8")
+    found = [item for item in run_doctor(tmp_path) if "runs twice" in item.what]
+    assert len(found) == 1 and found[0].level == WARN and "init" in found[0].fix
