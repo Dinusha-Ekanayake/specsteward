@@ -10,6 +10,7 @@ from specsteward import state as run_state
 from specsteward import trust
 from specsteward.check import resolve_cmd, without_bot_tokens
 from specsteward.config import Config
+from specsteward.remote import CHANNELS, state_dir
 from specsteward.safefs import ensure_safe
 from specsteward.tasks import parse_tasks
 
@@ -98,6 +99,29 @@ def _protected(path: Path, directories: tuple[Path, ...], files: tuple[Path, ...
     return any(_same(parent, d) for parent in (path, *path.parents) for d in directories)
 
 
+def _access_list_decision(path: Path, raw: str) -> dict[str, Any] | None:
+    """Ask (never deny) before file tools edit a phone channel's allowlist.
+
+    ``access.json`` says whose messages may answer permission prompts, so an agent that
+    adds an account to it could approve its own gates. The official channel plugin's own
+    skills edit it too, which is why this asks instead of blocking.
+    """
+    for channel in CHANNELS:
+        target = state_dir(channel) / "access.json"
+        if _same(path, target) or path == target.resolve():  # also when it does not exist yet
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "ask",
+                    "permissionDecisionReason": (
+                        f"specsteward: {raw} lists who may answer permission prompts from "
+                        "your phone. Only allow this edit if you asked for it."
+                    ),
+                }
+            }
+    return None
+
+
 def guard_decision(cfg: Config, payload: dict[str, Any]) -> dict[str, Any] | None:
     """Deny file-tool edits to ``.sdd/``, the trust store and Claude settings (PreToolUse)."""
     raw = _edited_path(payload)
@@ -110,7 +134,7 @@ def guard_decision(cfg: Config, payload: dict[str, Any]) -> dict[str, Any] | Non
     directories = (cfg.root / SHIM.parent.parent, trust.store_path().parent)
     files = tuple(cfg.root / rel for rel in CLAUDE_SETTINGS)
     if not _protected(path, directories, files):
-        return None
+        return _access_list_decision(path, raw)
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

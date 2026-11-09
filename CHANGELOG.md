@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5 (2026-11-10)
+
+### Fixed
+- File tools and shell commands now ask before changing a phone channel's `access.json` (the list of accounts that may answer permission prompts), so an agent cannot add an account and approve its own gates. It asks rather than blocks, because the official channel plugin's own skills edit that file.
+- `.sdd/state.json` is renamed into place with the same retry the trust store uses, so a virus scanner or the dashboard holding the file on Windows no longer makes a write fail.
+
 ## 0.3.4 (2026-11-10)
 
 ### Changed

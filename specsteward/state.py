@@ -59,7 +59,7 @@ def save(root: Path, state: State) -> None:
     tmp = path.with_suffix(".tmp")  # write then rename, so a crash never leaves half a file
     ensure_safe(root, tmp)
     tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    trust._retrying(lambda: os.replace(tmp, path))
     write_dashboard(root, state)  # the read-only HTML view stays current
 
 

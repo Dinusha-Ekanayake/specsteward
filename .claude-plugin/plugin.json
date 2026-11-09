@@ -1,6 +1,6 @@
 {
   "name": "specsteward",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Spec-driven development on autopilot: subagents implement approved specs test-first behind tamper-proof human gates, with a scripted quality gate, risk-based reviews (Opus for high risk), a code graph, a token budget, and approvals from your phone over Telegram or Discord.",
   "author": {
     "name": "Dinusha Ekanayake",

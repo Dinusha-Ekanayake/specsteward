@@ -54,6 +54,7 @@ PROTECTED = re.compile(
     r"(?:^|[\s'\"=/\\])\.sdd(?:[/\\](?!bin[/\\]sdd\b)|['\"\s]|$)"  # run state, not the shim
     r"|\.claude[/\\]specsteward"  # trust store, approvals, encrypted token
     r"|\.claude[/\\]settings(?:\.local)?\.json"  # the permission rules that make the gates
+    r"|\.claude[/\\]channels[/\\][^/\\\s]+[/\\]access\.json"  # who may answer from the phone
 )
 SECRET = re.compile(
     r"\.claude[/\\]channels[/\\][^/\\\s]+[/\\]\.env|\.claude[/\\]specsteward[/\\]secrets"

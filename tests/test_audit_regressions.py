@@ -150,3 +150,33 @@ def test_a_malformed_state_file_means_no_run(repo: Path) -> None:
     for raw in ("[]", "{not json"):
         (repo / ".sdd" / "state.json").write_text(raw, encoding="utf-8")
         assert state.load(repo) is None
+
+
+# --- the phone allowlist -------------------------------------------------------------------
+
+
+def test_file_tools_ask_before_editing_the_phone_allowlist(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from specsteward.hooks import guard_decision
+
+    state = tmp_path / "telegram-state"
+    state.mkdir()
+    monkeypatch.setenv("TELEGRAM_STATE_DIR", str(state))
+    cfg = config.load(repo)
+
+    def decide(path: Path) -> str | None:
+        payload = {"cwd": str(repo), "tool_input": {"file_path": str(path)}}
+        found = guard_decision(cfg, payload)
+        return found["hookSpecificOutput"]["permissionDecision"] if found else None
+
+    assert decide(state / "access.json") == "ask"  # not created yet
+    (state / "access.json").write_text("{}", encoding="utf-8")
+    assert decide(state / "access.json") == "ask"
+    assert decide(state / "other.json") is None
+
+
+def test_shell_commands_that_write_the_allowlist_ask() -> None:
+    assert _ask("echo '{}' > ~/.claude/channels/telegram/access.json")
+    assert _ask("sed -i s/a/b/ ~/.claude/channels/discord/access.json")
+    assert not _ask("cat ~/.claude/channels/telegram/access.json")
