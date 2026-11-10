@@ -201,3 +201,49 @@ def test_a_clean_verdict_needs_a_reviewer_the_hook_saw(repo: Path) -> None:
     run_state.record_review(cfg, task, "clean")
     with pytest.raises(ValueError, match="reviewer"):
         run_state.record_review(cfg, task, "clean")  # one reviewer run, one verdict
+
+
+# --- the run-state lock ----------------------------------------------------------------------
+
+
+def test_concurrent_state_updates_are_not_lost(repo: Path) -> None:
+    import threading
+
+    from specsteward import state as run_state
+
+    cfg = config.load(repo)
+    run_state.start(cfg, "009", check_branch=False)
+    errors: list[BaseException] = []
+
+    def work() -> None:
+        try:
+            for _ in range(5):
+                run_state.observe_agent(cfg, "specsteward:implementer", None)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    # threads share the re-entrancy flag's thread-local, so each takes the lock for real
+    threads = [threading.Thread(target=work) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    state = run_state.require(repo)
+    assert not errors
+    assert state["observed_agent_runs"] == 20
+
+
+def test_a_stale_state_lock_is_taken_over(repo: Path) -> None:
+    import os
+    import time
+
+    from specsteward import state as run_state
+
+    cfg = config.load(repo)
+    run_state.start(cfg, "009", check_branch=False)
+    lock = repo / ".sdd" / "state.lock"
+    lock.write_text("", encoding="utf-8")
+    old = time.time() - 120
+    os.utime(lock, (old, old))
+    run_state.observe_agent(cfg, "specsteward:implementer", None)
+    assert not lock.exists()

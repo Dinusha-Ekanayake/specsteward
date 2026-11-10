@@ -3,7 +3,6 @@
 ## Known limits
 
 - `sdd review <task> clean` is only partly a gate: once the SubagentStop hook has seen a subagent in the run, each clean verdict needs a `specsteward:reviewer` run that finished since the last one. Where the hook does not fire (older Claude Code) it stays honour-based, and the main agent could still record a verdict after a reviewer it ignored. Approval, trust, start, resume and sign-off are the tamper-proof gates.
-- `.sdd/state.json` is updated without a file lock; hooks and the CLI rarely run at the same moment, but a lost update is possible in principle.
 - Trust and approvals are keyed by the git repository, so two sdd projects in one repository share them.
 
 ## What specsteward can do

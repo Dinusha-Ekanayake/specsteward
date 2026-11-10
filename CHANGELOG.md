@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.7 (2026-11-10)
+
+### Fixed
+- `.sdd/state.json` updates are serialised with a lock file (`.sdd/state.lock`, taken over after 30 seconds if a killed process left it), so two sessions or a hook running beside a command no longer overwrite each other's counters or verdicts.
+
 ## 0.3.6 (2026-11-10)
 
 ### Changed
