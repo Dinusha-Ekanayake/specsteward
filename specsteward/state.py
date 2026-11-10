@@ -714,9 +714,12 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
         raise ValueError("verdict must be 'clean' or 'changes'")
     state = require(cfg.root)
     _not_halted(state)
+    _known_task(cfg.root, state, task_id)
     group = _gate(state)["group"]
     if group and task_id not in group:
-        raise ValueError(f"{task_id} is not in the group in flight ({group}); review that group")
+        raise ValueError(
+            f"{task_id} is not in the group in flight ({', '.join(group)}); review that group"
+        )
     entry = _task(state, task_id)
     if verdict == "clean" and not _review_witnessed(state):
         raise ValueError(
@@ -734,8 +737,18 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
 
 
 @locked
+def _known_task(root: Path, state: State, task_id: str) -> None:
+    try:
+        known = {task.id for task in parse_tasks(tasks_path(root, state))}
+    except (OSError, ValueError):
+        return  # an unreadable table is reported by the commands that need it
+    if task_id not in known:
+        raise ValueError(f"there is no task {task_id} in {state['spec_dir']}/tasks.md")
+
+
 def record_assumption(root: Path, task_id: str, text: str) -> State:
     state = require(root)
+    _known_task(root, state, task_id)
     _task(state, task_id)["assumptions"].append(text)
     save(root, state)
     return state
@@ -745,7 +758,8 @@ def done_problem(cfg: Config, state: State, task_id: str, risk: str = "high") ->
     """Why ``task_id`` cannot be ticked yet, or None when it can."""
     gate = _gate(state)
     if task_id not in gate["group"]:
-        return f"{task_id} is not in the group in flight ({gate['group']}); run `sdd next`"
+        flying = ", ".join(gate["group"]) or "none"
+        return f"{task_id} is not in the group in flight ({flying}); run `sdd next`"
     now = tree(cfg.root, state)
     if gate["passed"] != now:
         return "no passing `sdd check` for the code as it is now; run the gate again"
@@ -769,7 +783,13 @@ def red_warning(cfg: Config, state: State, task_id: str) -> str | None:
     """Warn mode: the same finding, shown but not blocking."""
     if cfg.tdd_mode != "warn":
         return None
-    return tdd_problem(cfg, state, task_id, _task_risk(cfg, state, task_id))
+    if tdd_problem(cfg, state, task_id, _task_risk(cfg, state, task_id)) is None:
+        return None
+    return (
+        f"{task_id} is ticked, but no failing test run was recorded for this group, so "
+        "test-first is not shown. Next time run the failing test through `sdd check` before "
+        'implementing, or say why none applies with `--waive-red "reason"`'
+    )
 
 
 @locked

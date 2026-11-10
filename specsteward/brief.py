@@ -158,7 +158,7 @@ def build_brief(cfg: Config, spec_dir: Path, task_ids: list[str], sdd: str = "sd
     tasks = {t.id: t for t in parse_tasks(spec_dir / "tasks.md")}
     missing = [i for i in task_ids if i not in tasks]
     if missing:
-        raise ValueError(f"unknown tasks: {missing}")
+        raise ValueError(f"unknown tasks: {', '.join(missing)} (see the ID column of tasks.md)")
     chosen: list[Task] = [tasks[i] for i in task_ids]
     tokens = set().union(*(_tokens(f"{t.text} {t.test}") for t in chosen))
     plan_lines = _capped(_matching_lines(spec_dir / "plan.md", tokens), MAX_PLAN_LINES, "lines")

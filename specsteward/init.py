@@ -295,7 +295,11 @@ def init_project(
     for key in ("allow", "ask", "deny"):
         added = [rule.split(": ", 1)[1] for rule in rules if rule.startswith(f"{key}: ")]
         if added:
-            done.append(f"permission rules ({labels[key]}): {', '.join(added)}")
+            shown = ", ".join(added[:3])
+            more = (
+                f" and {len(added) - 3} more (see .claude/settings.json)" if len(added) > 3 else ""
+            )
+            done.append(f"permission rules ({labels[key]}): {shown}{more}")
     legacy = _drop_legacy_project_hooks(root / ".claude" / "settings.json")
     if legacy:
         done.append(f"removed project hooks the plugin now provides: {', '.join(legacy)}")

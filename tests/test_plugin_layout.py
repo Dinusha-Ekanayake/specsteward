@@ -52,6 +52,22 @@ def test_the_runner_never_trusts_a_bare_bash_on_windows() -> None:
     assert b"\r" not in (ROOT / "scripts" / "hooks" / "run.cmd").read_bytes()  # bare LF only
 
 
+def test_the_runner_runs_under_cmd_exe() -> None:
+    """cmd.exe has to parse the batch half of the file as it is stored, with LF endings."""
+    import subprocess
+    import sys
+
+    import pytest
+
+    if sys.platform != "win32":
+        pytest.skip("cmd.exe only")
+    runner = ROOT / "scripts" / "hooks" / "run.cmd"
+    proc = subprocess.run(["cmd.exe", "/c", str(runner)], capture_output=True, text=True)
+    assert proc.returncode == 0
+    assert "needs a hook name" in proc.stderr
+    assert "is not recognized" not in proc.stderr + proc.stdout
+
+
 def test_the_runner_and_wrappers_are_executable_in_git() -> None:
     import subprocess
 

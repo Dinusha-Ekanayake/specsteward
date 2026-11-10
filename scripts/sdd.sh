@@ -79,7 +79,12 @@ case "${1:-}" in
     ;;
   hook-*) has_config || exit 0 ;;
   # The status line refreshes often; with no run there is nothing to show.
-  statusline) { has_config && [ -f "$CONFIG_DIR/.sdd/state.json" ]; } || exit 0 ;;
+  statusline)
+    case "${2:-}" in
+      -h|--help) ;;
+      *) { has_config && [ -f "$CONFIG_DIR/.sdd/state.json" ]; } || exit 0 ;;
+    esac
+    ;;
 esac
 
 pick_python

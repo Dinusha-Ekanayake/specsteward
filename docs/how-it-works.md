@@ -22,7 +22,7 @@ Everything that can be a script is a script, so models spend tokens only on judg
 sdd approve 003 --start  (prompt) records the spec's hash, then starts the run:
                          refuses unless approved content matches and the branch matches
 loop:
-  sdd next               -> {tasks, risk, review, reviewer_model, restart_implementer}
+  sdd next               -> {tasks, risk, review, reviewer_model, human_signoff, restart_implementer}
                             | halted | done   (records the group in flight)
   sdd brief T-003-01 ... -> .sdd/briefs/T-003-01.md
   implementer(brief)     -> short report
@@ -39,7 +39,7 @@ done: sdd converge -> converger appends missing work? -> you approve it (approve
 
 ## Stop hook
 
-While a run is active and tasks are open, the Stop hook asks Claude to continue, but only if a task was completed since the last automatic continue. No progress halts the run. A halted or stopped run never blocks a stop.
+While a run is active and tasks are open, the Stop hook asks Claude to continue, but only if a task was completed or a subagent finished since the last automatic continue. No progress halts the run. A halted or stopped run never blocks a stop.
 
 ## State
 

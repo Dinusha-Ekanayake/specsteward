@@ -157,7 +157,7 @@ Briefs are capped (40 plan lines, 12 files, 25 names per file); anything cut is 
 `.claude/settings.json` gets, without removing anything already there:
 
 - `allow`: `bash .sdd/bin/sdd` (everything not listed under `ask`), `git status`, `git diff`, `git log`, `git rev-parse`
-- `ask`: `sdd approve`, `sdd trust`, `sdd start`, `sdd resume`, `sdd signoff`, `git commit`, `git push`, `gh pr create`, `gh pr merge`
+- `ask`: `sdd approve`, `sdd trust`, `sdd start`, `sdd resume`, `sdd signoff`, `sdd phone`, `sdd install`, `sdd worktree`, `sdd init`, `git commit`, `git push`, `gh pr create`, `gh pr merge`. Each `sdd` rule is written twice, for the Bash tool and for the PowerShell tool (Claude Code on Windows may use either)
 - `deny`: `Edit(.sdd/**)`, `Edit(~/.claude/specsteward/**)`, `Edit(.claude/settings.json)`, `Edit(.claude/settings.local.json)`
 
 `ask` wins over `allow`, so the gates always prompt. You may drop the `git` rules if you want commits without a prompt; `sdd doctor` will only warn. The `sdd` rules are the gates and `sdd doctor` fails without them.

@@ -504,7 +504,7 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
                 + ", ".join(extra)
             )
         for line in drift.notes(cfg, run):
-            print(f"drift: {line}")
+            print(line)
         files = [line for line in lines if line.startswith("outside")]
         symbols = [line for line in lines if line.startswith("unplanned")]
         blocked = (
@@ -538,7 +538,7 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
             print(f"warning: outside the plan: {outside}", file=sys.stderr)
     if command == "done" and cfg.symbol_mode == "warn":
         for name in scope_mod.unplanned_symbols(cfg, state):
-            note = f"warning: unplanned change {name}; name it in the plan or revert"
+            note = f"warning: unplanned symbol: {name}; name it in the plan or revert"
             print(note, file=sys.stderr)
     if command == "done":
         for line in drift.notes(cfg, state, final=True):

@@ -257,7 +257,9 @@ def run_doctor(start: Path, extra: list[Finding] | None = None) -> list[Finding]
     try:
         cfg = cfg_mod.load(start)
     except ValueError as error:
-        return [*found, Finding(FAIL, str(error), "run `/specsteward:init`")]
+        missing = "no sdd.toml" in str(error)
+        fix = "run `/specsteward:init`" if missing else "fix sdd.toml (see docs/configuration.md)"
+        return [*found, Finding(FAIL, str(error), fix)]
     found.append(_git(cfg.root))
     found += _checks(cfg)
     found += _permissions(cfg.root)

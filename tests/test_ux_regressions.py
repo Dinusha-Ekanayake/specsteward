@@ -87,3 +87,29 @@ def test_every_command_explains_itself(capsys: pytest.CaptureFixture[str]) -> No
     with pytest.raises(SystemExit):
         main(["start", "--help"])
     assert "three-digit spec number" in capsys.readouterr().out
+
+
+def test_doctor_gives_the_right_fix_for_a_broken_config(repo: Path) -> None:
+    from specsteward.doctor import run_doctor
+
+    (repo / "sdd.toml").write_text("[scope]\nsymbol = 'enforce'\n", encoding="utf-8")
+    last = run_doctor(repo)[-1]
+    assert "has no key 'symbol'" in last.what and "fix sdd.toml" in last.fix
+
+
+def test_an_unknown_task_id_is_refused(repo: Path) -> None:
+    from specsteward import state as run_state
+
+    cfg, _run = _symbol_project(repo)
+    with pytest.raises(ValueError, match="there is no task T-009-99"):
+        run_state.record_assumption(repo, "T-009-99", "x")
+    with pytest.raises(ValueError, match="there is no task T-009-99"):
+        run_state.record_review(cfg, "T-009-99", "changes")
+
+
+def test_init_keeps_the_permission_summary_short(tmp_path: Path) -> None:
+    from specsteward.init import init_project
+
+    lines = [line for line in init_project(tmp_path, "generic") if "permission rules" in line]
+    assert lines and all(len(line) < 200 for line in lines)
+    assert any("more (see .claude/settings.json)" in line for line in lines)
