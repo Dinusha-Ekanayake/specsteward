@@ -16,7 +16,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, TypeVar
 
-from specsteward import scope, trust, usage
+from specsteward import drift, scope, trust, usage
 from specsteward.config import CONFIG_FILE, SPEC_NUMBER, Config
 from specsteward.dashboard import write_dashboard
 from specsteward.graph import ensure_ignores
@@ -721,7 +721,7 @@ def done_problem(cfg: Config, state: State, task_id: str, risk: str = "high") ->
         return "no passing `sdd check` for the code as it is now; run the gate again"
     if risk not in cfg.review_skip and gate["reviewed"] != now:
         return "no clean review for the code as it is now; review it (again) first"
-    problem = scope.problem(cfg, state)
+    problem = scope.problem(cfg, state) or drift.problem(cfg, state)
     if problem:
         return problem
     return tdd_problem(cfg, state, task_id, risk) if cfg.tdd_mode == "enforce" else None

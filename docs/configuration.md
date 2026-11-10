@@ -82,12 +82,29 @@ Only `"low"` is allowed. High and human risk are always reviewed.
 [scope]
 mode = "enforce"        # enforce | warn | off: files outside the plan
 symbols = "warn"        # enforce | warn | off: public symbols the plan does not name
+surface = "warn"        # enforce | warn | off: new imports and calls that reach out
+growth = "warn"         # enforce | warn | off: a function that grew past max_growth
+max_growth = 80         # syntax-tree nodes a function may gain in one run (0 = off)
 allow = ["docs/**"]     # extra globs a run may always touch
 ```
 
 The approval hash proves the spec, plan and task table did not change. It cannot see code wandering outside them, so `sdd done` also compares the files changed since the run started with the files the approved plan names in backticks (the `Modules / files` table). Tests, `CHANGELOG*` and the spec folder are always allowed (`sdd scope` lists what only the allow-list let through, so it stays visible). Files that were already changed when the run started are compared by content, so the run is blamed only for what it does to them. A symbol counts as named only in the plan's `Modules / files` section, a `path::name` mention, or a task row. In `enforce` mode a task is not ticked while anything else has changed; `sdd scope` lists the files. To widen the scope, add the file to `plan.md`: that changes the approved plan, so the spec has to be approved again before the run goes on. `warn` only lists them; a plan that names no files is not checked.
 
 `symbols` goes one level deeper, inside files the plan does name: a public function, class or method that a run adds or changes in a file that existed before the run must be mentioned in backticks in `plan.md` or `tasks.md` (`` `login()` ``, `` `Auth.login` ``). Private names (leading underscore), new files and tests are not checked. Python is compared by syntax tree (a moved or reformatted function is not a change); JavaScript and TypeScript only see new `export`s. The default is `warn`, which prints the names on `sdd done`; `enforce` makes `sdd done` refuse until they are named, which changes the plan and so needs approval again.
+
+`surface`, `growth` and `[coverage]` look at what a run does *inside* a function the plan already names. None of them proves the code correct; they make silent drift visible, or refuse it.
+
+- `surface`: a changed source file may not gain an import of, or a call to, a process, the network, `eval`/`exec`, a file deletion or a write-mode `open`, unless `plan.md` or `tasks.md` names it in backticks (`` `subprocess` ``). Python is read by syntax tree; JavaScript and TypeScript by `require`/`import` of `child_process`, `fs`, `net`, `http`, `https` and the like, plus `eval` and `new Function`.
+- `growth`: a function or method that gained more than `max_growth` syntax-tree nodes (about eight simple statements for 80) is listed. Python only.
+- `[coverage]`: every line a run adds or changes must be run by a test.
+
+```toml
+[coverage]
+report = "coverage.xml"   # Cobertura XML or lcov file your test step writes; "" turns it off
+mode = "warn"             # enforce | warn | off
+```
+
+Point `report` at the file your own test step produces (`pytest --cov --cov-report=xml`, `jest --coverage --coverageReporters=lcov` and so on) and add the flag to the `[[check]]` test command. `sdd done` then compares the report with the lines changed since the run started. A report that is missing, unreadable or older than the changes counts as a finding, so the gate has to be run again after the last edit. In `enforce` mode `sdd done` refuses until each finding is fixed, named in the plan (which needs approval again) or reverted. The defaults are `warn`.
 
 ## `[tdd]`
 

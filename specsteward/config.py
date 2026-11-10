@@ -103,6 +103,11 @@ class Config:
     tdd_mode: str = "warn"  # off | warn | enforce: a failing test run before the passing one
     symbol_mode: str = "warn"  # enforce | warn | off: public symbols the plan does not name
     scope_allow: tuple[str, ...] = ()  # extra globs a run may always touch
+    surface_mode: str = "warn"  # enforce | warn | off: new imports and calls that reach out
+    growth_mode: str = "warn"  # enforce | warn | off: a function that grew past max_growth
+    max_growth: int = 80  # syntax-tree nodes a function may gain in one run
+    coverage_mode: str = "warn"  # enforce | warn | off: changed lines no test runs
+    coverage_report: str = ""  # Cobertura XML or lcov file the test step writes; "" = unused
 
     def spec_dir(self, spec: str) -> Path:
         if not SPEC_NUMBER.fullmatch(spec):
@@ -234,9 +239,23 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
     tdd_mode = str(raw.get("tdd", {}).get("red_first", "warn"))
     if tdd_mode not in ("enforce", "warn", "off"):
         raise ValueError("[tdd] red_first must be 'enforce', 'warn' or 'off'")
-    for key, value in (("mode", scope_mode), ("symbols", symbol_mode)):
+    surface_mode = str(scope.get("surface", "warn"))
+    growth_mode = str(scope.get("growth", "warn"))
+    coverage = raw.get("coverage", {})
+    coverage_mode = str(coverage.get("mode", "warn"))
+    for key, value in (
+        ("mode", scope_mode),
+        ("symbols", symbol_mode),
+        ("surface", surface_mode),
+        ("growth", growth_mode),
+    ):
         if value not in ("enforce", "warn", "off"):
             raise ValueError(f"[scope] {key} must be 'enforce', 'warn' or 'off'")
+    if coverage_mode not in ("enforce", "warn", "off"):
+        raise ValueError("[coverage] mode must be 'enforce', 'warn' or 'off'")
+    max_growth = scope.get("max_growth", 80)
+    if isinstance(max_growth, bool) or not isinstance(max_growth, int) or max_growth < 0:
+        raise ValueError("[scope] max_growth must be a whole number, 0 or more (0 turns it off)")
     status_regex = str(project.get("status_regex", Config.status_regex))
     _regex(status_regex, "[project] status_regex")
     if re.compile(status_regex).groups < 2:
@@ -277,6 +296,11 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
         symbol_mode=symbol_mode,
         tdd_mode=tdd_mode,
         scope_allow=_tuple(scope.get("allow")),
+        surface_mode=surface_mode,
+        growth_mode=growth_mode,
+        max_growth=max_growth,
+        coverage_mode=coverage_mode,
+        coverage_report=str(coverage.get("report", "")),
     )
 
 

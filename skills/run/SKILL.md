@@ -72,7 +72,8 @@ run uses a `fix/<NNN>-*` or `feature/<NNN>-*` branch.
       adversarial test, run `SDD check` once more first. `human` tasks are marked `[?]`
       automatically. Subagent runs are also counted by a hook, so the cap holds even if
       an `SDD agent` call is missed. `SDD done` also reports files outside the approved
-      plan (`SDD scope` lists them) and, with `[tdd] red_first`, a group that never had a
+      plan (`SDD scope` lists them), changed lines no test runs (`[coverage]`), new
+      imports or calls that reach out, and functions that grew past the budget, and, with `[tdd] red_first`, a group that never had a
       failing test run: warnings by default, refusals when the project set `enforce`. If
       the implementer said no test applies, tick with `SDD done <id> --waive-red "<why>"`;
       for a file the work really needs, ask the user to add it to `plan.md` and approve

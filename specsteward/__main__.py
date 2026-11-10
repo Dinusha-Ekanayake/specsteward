@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from specsteward import config as cfg_mod
-from specsteward import graph, phone, prereqs, trust, wizard
+from specsteward import drift, graph, phone, prereqs, trust, wizard
 from specsteward import scope as scope_mod
 from specsteward import state as run_state
 from specsteward.analyze import analyze
@@ -401,6 +401,8 @@ def _check(cfg: cfg_mod.Config, task: str | None) -> int:
     if active is not None and active["active"] and cfg.scope_mode != "off":
         for line in scope_mod.notes(cfg, active):
             print(f"SCOPE: {line}")
+        for line in drift.notes(cfg, active):
+            print(f"DRIFT: {line}")
     if all(r.ok for r in results):
         run_state.record_pass(cfg, before)
         return 0
@@ -484,10 +486,14 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
                 "allowed without being planned (tests, changelog, [scope] allow): "
                 + ", ".join(extra)
             )
+        for line in drift.notes(cfg, run):
+            print(f"drift: {line}")
         files = [line for line in lines if line.startswith("outside")]
         symbols = [line for line in lines if line.startswith("unplanned")]
-        blocked = (files and cfg.scope_mode == "enforce") or (
-            symbols and cfg.symbol_mode == "enforce"
+        blocked = (
+            (files and cfg.scope_mode == "enforce")
+            or (symbols and cfg.symbol_mode == "enforce")
+            or drift.problem(cfg, run)
         )
         return 1 if blocked else 0
     if command == "remote":
@@ -514,6 +520,9 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         for name in scope_mod.unplanned_symbols(cfg, state):
             note = f"warning: unplanned change {name}; name it in the plan or revert"
             print(note, file=sys.stderr)
+    if command == "done":
+        for line in drift.notes(cfg, state):
+            print(f"warning: {line}", file=sys.stderr)
     print(json.dumps({k: state[k] for k in ("spec", "active", "halted", "agent_runs")}))
     return 0
 

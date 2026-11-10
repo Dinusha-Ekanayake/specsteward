@@ -11,6 +11,7 @@ import ast
 import hashlib
 import re
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -341,6 +342,26 @@ def allowed_unplanned(cfg: Config, state: dict[str, Any]) -> list[str]:
         and not any(_matches(path, pattern) for pattern in planned)
         and any(_matches(path, pattern) for pattern in allow)
     ]
+
+
+def changed_sources(cfg: Config, state: dict[str, Any]) -> Iterator[tuple[str, str | None, str]]:
+    """Source files the run changed (not tests, the spec folder or tool folders), each with
+    its text at the start of the run (None for a new file) and its text now."""
+    start = state.get("scope") or {}
+    if not start.get("base"):
+        return
+    spec_dir = f"{state['spec_dir']}/"
+    for path in _touched(cfg.root, start):
+        file = cfg.root / path
+        if _ignored(path) or path.startswith(spec_dir) or not file.is_file():
+            continue
+        if any(_matches(path, pattern) for pattern in DEFAULT_ALLOW):
+            continue
+        try:
+            after = file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        yield path, _start_text(cfg.root, start, path), after
 
 
 def notes(cfg: Config, state: dict[str, Any]) -> list[str]:
