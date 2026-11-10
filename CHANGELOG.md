@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 (2026-11-10)
+
+### Added
+- Scope guard: `sdd done` refuses while files outside the approved plan's `Modules / files` (plus tests, `CHANGELOG*`, the spec folder and `[scope] allow`) have changed since the run started. `sdd scope` lists them; `[scope] mode` is `enforce` (default), `warn` or `off`. Widening the scope means editing the plan, which breaks the approval hash and needs the user's approval again.
+- Runs record the commit and dirty files at start, so earlier uncommitted work is not blamed on the run.
+
+## 0.3.7 (2026-11-10)
+
+### Fixed
+- `.sdd/state.json` updates are serialised with a lock file (`.sdd/state.lock`, taken over after 30 seconds if a killed process left it), so two sessions or a hook running beside a command no longer overwrite each other's counters or verdicts.
+
 ## 0.3.6 (2026-11-10)
 
 ### Changed

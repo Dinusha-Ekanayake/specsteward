@@ -7,12 +7,16 @@ import re
 import secrets
 import shutil
 import subprocess
+import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
-from specsteward import trust, usage
+from specsteward import scope, trust, usage
 from specsteward.config import SPEC_NUMBER, Config
 from specsteward.dashboard import write_dashboard
 from specsteward.graph import ensure_ignores
@@ -25,6 +29,60 @@ STATE_FILE = STATE_DIR / "state.json"
 APPROVALS_FILE = STATE_DIR / "approvals.log"
 
 State = dict[str, Any]
+
+
+LOCK_TIMEOUT = 10.0
+STALE_LOCK = 30.0
+_held = threading.local()
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+@contextmanager
+def _lock(root: Path) -> Iterator[None]:
+    """Serialise read-modify-write of state.json across sessions and hook processes."""
+    if getattr(_held, "depth", 0):  # a locked function calling another one
+        _held.depth += 1
+        try:
+            yield
+        finally:
+            _held.depth -= 1
+        return
+    path = root / STATE_FILE
+    ensure_safe(root, path)
+    lock = path.with_suffix(".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + LOCK_TIMEOUT
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except (FileExistsError, PermissionError):  # PermissionError: Windows, file in use
+            try:
+                if time.time() - lock.stat().st_mtime > STALE_LOCK:
+                    lock.unlink(missing_ok=True)  # left behind by a killed process
+                    continue
+            except OSError:
+                continue
+            if time.monotonic() > deadline:
+                raise ValueError(f"run state is locked ({lock}); try again") from None
+            time.sleep(0.05)
+    _held.depth = 1
+    try:
+        yield
+    finally:
+        _held.depth = 0
+        lock.unlink(missing_ok=True)
+
+
+def locked(func: F) -> F:
+    """Run a state-changing function under the state lock (first argument: Config or root)."""
+
+    @wraps(func)
+    def wrapper(first: Any, *args: Any, **kwargs: Any) -> Any:
+        with _lock(first.root if isinstance(first, Config) else first):
+            return func(first, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
 
 
 def load(root: Path) -> State | None:
@@ -85,6 +143,7 @@ def current_branch(root: Path) -> str:
     raise ValueError("not a git repository")
 
 
+@locked
 def approve(cfg: Config, spec: str, via: str) -> str:
     """Mark a spec approved, bind the approval to its content, and log it.
 
@@ -261,6 +320,7 @@ def approval_problem(cfg: Config, spec: str, directory: Path) -> str | None:
     return None
 
 
+@locked
 def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
     """Start a fresh run. Refuses while a run is active, so counters are never wiped by accident."""
     current = load(cfg.root)
@@ -296,6 +356,7 @@ def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
         "started_at": datetime.now(UTC).isoformat(),
         "usage": usage.empty(),
         "gate": _fresh_gate([]),
+        "scope": scope.snapshot(cfg.root),
         "tasks": {},
     }
     save(cfg.root, state)
@@ -324,12 +385,14 @@ def _task(state: State, task_id: str) -> dict[str, Any]:
     return entry
 
 
+@locked
 def halt(root: Path, state: State, reason: str) -> State:
     state["halted"] = reason
     save(root, state)
     return state
 
 
+@locked
 def next_step(cfg: Config) -> dict[str, Any]:
     state = require(cfg.root)
     if state["halted"]:
@@ -377,6 +440,7 @@ IN_FLIGHT_SECONDS = 2 * 60 * 60  # longer than any one subagent run should take
 OUR_AGENT_PREFIXES = ("specsteward:", "sdd-pilot:")
 
 
+@locked
 def record_agent(cfg: Config, role: str, fresh: bool) -> State:
     state = require(cfg.root)
     state["agent_runs"] += 1
@@ -402,6 +466,7 @@ def owned_elsewhere(state: State, session_id: object) -> bool:
     return bool(owner and session_id and owner != session_id)
 
 
+@locked
 def bind_owner(cfg: Config, payload: dict[str, Any]) -> State | None:
     """PostToolUse on Bash: the session that starts, resumes or claims the run owns it.
 
@@ -422,6 +487,7 @@ def bind_owner(cfg: Config, payload: dict[str, Any]) -> State | None:
     return state
 
 
+@locked
 def observe_agent(
     cfg: Config, agent_type: object = None, session_id: object = None
 ) -> State | None:
@@ -461,6 +527,7 @@ def run_tree(cfg: Config) -> str | None:
     return tree(cfg.root, state)
 
 
+@locked
 def observe_usage(cfg: Config, transcript_path: object, session_id: object = None) -> State | None:
     """Add the run's new token usage from the transcripts; halt over ``max_tokens``."""
     state = load(cfg.root)
@@ -480,6 +547,7 @@ def observe_usage(cfg: Config, transcript_path: object, session_id: object = Non
     return state
 
 
+@locked
 def record_pass(cfg: Config, before: str | None = None) -> State | None:
     """Remember the tree a passing gate saw (only during a run, for the group in flight).
 
@@ -506,6 +574,7 @@ def current_task(cfg: Config) -> str | None:
     return str(group[0]) if group else None
 
 
+@locked
 def record_failure(cfg: Config, task_id: str, signature: str) -> State:
     state = require(cfg.root)
     entry = _task(state, task_id)
@@ -530,6 +599,7 @@ def _review_witnessed(state: State) -> bool:
     return int(state.get("observed_reviews", 0)) > int(state.get("accepted_reviews", 0))
 
 
+@locked
 def record_review(cfg: Config, task_id: str, verdict: str) -> State:
     if verdict not in ("clean", "changes"):
         raise ValueError("verdict must be 'clean' or 'changes'")
@@ -553,6 +623,7 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
     return state
 
 
+@locked
 def record_assumption(root: Path, task_id: str, text: str) -> State:
     state = require(root)
     _task(state, task_id)["assumptions"].append(text)
@@ -570,9 +641,10 @@ def done_problem(cfg: Config, state: State, task_id: str, risk: str = "high") ->
         return "no passing `sdd check` for the code as it is now; run the gate again"
     if risk not in cfg.review_skip and gate["reviewed"] != now:
         return "no clean review for the code as it is now; review it (again) first"
-    return None
+    return scope.problem(cfg, state)
 
 
+@locked
 def complete(cfg: Config, task_id: str, human: bool = False) -> State:
     """Tick a task, but only after a passing gate and a clean review of the current tree."""
     state = require(cfg.root)
@@ -595,6 +667,7 @@ def complete(cfg: Config, task_id: str, human: bool = False) -> State:
     return state
 
 
+@locked
 def signoff(cfg: Config, task_id: str) -> State:
     """The user's sign-off on a human task: ``[?]`` becomes ``[x]``.
 
@@ -620,11 +693,13 @@ def signoff(cfg: Config, task_id: str) -> State:
     return state
 
 
+@locked
 def claim(root: Path) -> State:
     """Make the calling session the run's owner (recorded by the PostToolUse hook)."""
     return require(root)
 
 
+@locked
 def resume(root: Path) -> State:
     """Clear a halt after the user has dealt with it; open tasks get fresh counters."""
     state = require(root)
@@ -637,6 +712,7 @@ def resume(root: Path) -> State:
     return state
 
 
+@locked
 def stop(root: Path) -> State:
     state = require(root)
     state["active"] = False

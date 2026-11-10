@@ -18,7 +18,11 @@ You implement tasks with strict TDD. You are handed the path of a brief file.
    test style. Reuse what the brief shows instead of writing a second version.
 4. Run the gate, `bash .sdd/bin/sdd check`, from the repository root without a `cd`
    prefix. Iterate until it prints `SDD CHECK: PASS`.
-5. Do not tick tasks, commit, push, install packages, or touch data the project marks as
+5. Stay inside the files the plan names (`Modules / files`) plus tests. `bash .sdd/bin/sdd scope`
+   lists anything else you changed; `sdd done` refuses while it is not empty. If the work
+   really needs another file, report `STATUS: blocked` with the file and why: widening the
+   scope means changing the plan, which the user has to approve again.
+6. Do not tick tasks, commit, push, install packages, or touch data the project marks as
    off-limits.
 
 Report `STATUS: blocked` instead of guessing when a choice changes behaviour the spec

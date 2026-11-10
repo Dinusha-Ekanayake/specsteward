@@ -201,3 +201,109 @@ def test_a_clean_verdict_needs_a_reviewer_the_hook_saw(repo: Path) -> None:
     run_state.record_review(cfg, task, "clean")
     with pytest.raises(ValueError, match="reviewer"):
         run_state.record_review(cfg, task, "clean")  # one reviewer run, one verdict
+
+
+# --- the run-state lock ----------------------------------------------------------------------
+
+
+def test_concurrent_state_updates_are_not_lost(repo: Path) -> None:
+    import threading
+
+    from specsteward import state as run_state
+
+    cfg = config.load(repo)
+    run_state.start(cfg, "009", check_branch=False)
+    errors: list[Exception] = []
+
+    def work() -> None:
+        try:
+            for _ in range(5):
+                run_state.observe_agent(cfg, "specsteward:implementer", None)
+        except Exception as exc:
+            errors.append(exc)
+
+    # threads share the re-entrancy flag's thread-local, so each takes the lock for real
+    threads = [threading.Thread(target=work) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    state = run_state.require(repo)
+    assert not errors
+    assert state["observed_agent_runs"] == 20
+
+
+def test_a_stale_state_lock_is_taken_over(repo: Path) -> None:
+    import os
+    import time
+
+    from specsteward import state as run_state
+
+    cfg = config.load(repo)
+    run_state.start(cfg, "009", check_branch=False)
+    lock = repo / ".sdd" / "state.lock"
+    lock.write_text("", encoding="utf-8")
+    old = time.time() - 120
+    os.utime(lock, (old, old))
+    run_state.observe_agent(cfg, "specsteward:implementer", None)
+    assert not lock.exists()
+
+
+# --- scope: the code stays inside the approved plan -----------------------------------------
+
+
+def _git_repo(repo: Path) -> None:
+    import subprocess
+
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "t"),
+        ("add", "."),
+        ("commit", "-q", "-m", "init"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def test_planned_paths_reads_backticked_files_only() -> None:
+    from specsteward.scope import planned_paths
+
+    plan = "| `src/a.py` | x |\n| `pkg/` | y |\nuse `foo` and `--flag` and `src/*.ts`"
+    assert planned_paths(plan) == ["src/a.py", "pkg/", "src/*.ts"]
+
+
+def test_changes_outside_the_plan_block_done_until_reapproved(repo: Path) -> None:
+    from specsteward import scope
+    from specsteward import state as run_state
+
+    plan = repo / "specs" / "009-demo" / "plan.md"
+    plan.write_text("# Plan\n\n| `src/ok.py` | one |\n", encoding="utf-8")
+    cfg = config.load(repo)
+    _git_repo(repo)
+    run_state.approve(cfg, "009", "test")  # the plan changed, so the spec is approved again
+    run_state.start(cfg, "009", check_branch=False)
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "src" / "sneaky.py").write_text("y = 2\n", encoding="utf-8")
+    (repo / "tests").mkdir(exist_ok=True)
+    (repo / "tests" / "test_ok.py").write_text("def test_a(): ...\n", encoding="utf-8")
+    run = run_state.require(repo)
+    assert scope.out_of_scope(cfg, run) == ["src/sneaky.py"]
+    assert "outside the approved plan" in str(scope.problem(cfg, run))
+    task = run_state.next_step(cfg)["tasks"][0]
+    run_state.record_pass(cfg)
+    run_state.record_review(cfg, task, "clean")
+    with pytest.raises(ValueError, match="outside the approved plan"):
+        run_state.complete(cfg, task)
+    (repo / "src" / "sneaky.py").unlink()
+    run_state.record_pass(cfg)
+    run_state.record_review(cfg, task, "clean")
+    run_state.complete(cfg, task)
+
+
+def test_scope_can_warn_or_be_off(repo: Path) -> None:
+    from specsteward.config import from_dict
+
+    assert from_dict(repo, {"scope": {"mode": "warn"}}).scope_mode == "warn"
+    with pytest.raises(ValueError, match="scope"):
+        from_dict(repo, {"scope": {"mode": "loose"}})

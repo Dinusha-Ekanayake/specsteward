@@ -26,6 +26,10 @@ low = "sonnet"
 high = "opus"
 human = "opus"
 
+[scope]
+# mode = "enforce"   # enforce | warn | off: changes outside the plan's files block `sdd done`
+# allow = []         # extra globs a run may always touch
+
 # Per-task reviews. skip = ["low"] saves a reviewer run per low-risk group; the final
 # Opus review of the branch still covers those tasks. High and human risk always get one.
 [review]
