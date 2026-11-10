@@ -302,7 +302,7 @@ def test_a_stranger_with_the_right_name_but_no_code_is_never_paired(state: Path)
 
 
 def test_stranger_text_is_printed_without_control_characters() -> None:
-    assert wizard._plain("a[31mred‮b") == "a?[31mred?b"
+    assert wizard._plain("a\x1b[31mred\u202eb") == "a?[31mred?b"
 
 
 def test_an_unreadable_access_list_is_kept_as_a_backup(tmp_path: Path) -> None:
