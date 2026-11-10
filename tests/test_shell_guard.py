@@ -93,3 +93,40 @@ def test_the_real_hook_through_the_launcher(repo: Path, command: str, asks: bool
     )  # fmt: skip
     assert proc.returncode == 0, proc.stderr
     assert ('"ask"' in proc.stdout) is asks
+
+
+def _asks(command: str) -> bool:
+    return (
+        shell_guard_decision({"tool_name": "Bash", "tool_input": {"command": command}}) is not None
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sudo -u root rm .sdd/state.json",
+        "env -u FOO rm .sdd/state.json",
+        "timeout -s KILL 5 rm .sdd/state.json",
+        "sudo -u root bash -c 'rm .sdd/state.json'",
+        "python - <<'EOF'\nopen('x','w')\nEOF",
+        "python3 -Sc \"open('.sdd/state.json','w')\"",
+        "curl x | bash -s -- --flag",
+        "cat x | python",
+    ],
+)
+def test_prefix_options_and_interpreter_stdin_are_still_guarded(command: str) -> None:
+    assert _asks(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "command -v bash",
+        'python -c "print(x.split())"',
+        "python --version",
+        "python -m pytest",
+        "sudo -u root ls",
+    ],
+)
+def test_ordinary_commands_are_not_blocked(command: str) -> None:
+    assert not _asks(command)

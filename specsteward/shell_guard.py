@@ -98,11 +98,22 @@ PREFIXES = frozenset(
     ("env", "command", "nohup", "time", "xargs", "sudo", "doas", "exec", "builtin", "stdbuf")
     + ("nice", "setsid", "timeout")
 )
+# Options of a prefix command that take a separate argument (`sudo -u root rm ...`).
+PREFIX_ARGS = {
+    "sudo": frozenset(("-u", "-g", "-C", "-h", "-p", "-r", "-t", "-U", "--user", "--group")),
+    "doas": frozenset(("-u", "-C")),
+    "env": frozenset(("-u", "-C", "-S", "--unset", "--chdir")),
+    "timeout": frozenset(("-s", "-k", "--signal", "--kill-after")),
+    "nice": frozenset(("-n", "--adjustment")),
+    "stdbuf": frozenset(("-i", "-o", "-e")),
+    "xargs": frozenset(("-I", "-n", "-P", "-L", "-s", "-d", "-E")),
+}
+LOOKUPS = frozenset(("-v", "-V"))  # `command -v bash` only looks a name up
 CD = frozenset(("cd", "pushd", "chdir", "set-location", "sl"))
 INTERPRETERS = frozenset(("python", "python3", "py", "node", "perl", "ruby", "php", "deno"))
-CODE_FLAGS = frozenset(("-c", "-e", "-p", "--eval", "--print", "-r"))
+CODE_FLAG = re.compile(r"-[a-zA-Z]*[cepr]|--eval|--print")
 RISKY_CODE = re.compile(
-    r"specsteward|\.s|environ|getenv|settings|trust|subprocess|os\.system|__import__"
+    r"specsteward|\.sdd|environ|getenv|settings|trust|subprocess|os\.system|__import__"
     r"|b64decode|base64|\bexec\b|\beval\b|chr\(|['\"]\s*\+\s*['\"]",
     re.IGNORECASE,
 )
@@ -143,6 +154,8 @@ def _protected(text: str) -> bool:
 def _has_script(words: list[str]) -> bool:
     """False for a shell that will read its commands from stdin (`bash`, `bash -s`)."""
     rest = [word for word in words[1:] if not word.startswith("<")]
+    if "-s" in rest:
+        return False  # `bash -s -- arg` still reads its commands from stdin
     return any(not word.startswith(("-", "/")) for word in rest) or any(
         _is_inline(word) for word in rest
     )
@@ -162,9 +175,14 @@ def _words(segment: str) -> list[str]:
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
             words = words[1:]  # VAR=value prefixes
         elif _name(words[0]) in PREFIXES and len(words) > 1:
+            prefix = _name(words[0])
+            if prefix in ("command", "builtin") and words[1] in LOOKUPS:
+                break
+            takes_arg = PREFIX_ARGS.get(prefix, frozenset())
             words = words[1:]
             while words and (words[0].startswith("-") or re.fullmatch(r"\d+[smhd]?", words[0])):
-                words = words[1:]  # the prefix's own options (`env -i`, `timeout 5`)
+                skip = 2 if words[0] in takes_arg else 1
+                words = words[skip:]  # the prefix's own options (`env -i`, `sudo -u root`)
         else:
             break
     return words
@@ -272,8 +290,14 @@ def _reason(command: str) -> str:
             return CHANGES_STATE
         if in_protected and redirects:
             return CHANGES_STATE
-        if name in INTERPRETERS and CODE_FLAGS & set(words[1:]) and RISKY_CODE.search(command):
-            return "inline code that touches run state, the environment or its own name"
+        if name in INTERPRETERS:
+            args = [w for w in words[1:] if not w.startswith("<")]
+            no_script = not any(not w.startswith("-") for w in args)
+            reads_stdin = not args or "-" in args or "<<" in segment
+            if no_script and reads_stdin and not any(CODE_FLAG.fullmatch(w) for w in args):
+                return STDIN_SHELL  # `python - <<EOF`, `cat x | python`
+            if any(CODE_FLAG.fullmatch(w) for w in args) and RISKY_CODE.search(command):
+                return "inline code that touches run state, the environment or its own name"
     return ""
 
 

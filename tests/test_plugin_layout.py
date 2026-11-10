@@ -49,7 +49,7 @@ def test_the_runner_never_trusts_a_bare_bash_on_windows() -> None:
     block = runner.split("CMDBLOCK")[1]  # the part cmd.exe runs
     assert "System32" in block and "WindowsApps" in block  # both stubs are skipped by name
     assert '"%GITBASH%" "%HOOK_SH%"' in block
-    assert "\r" not in runner  # the here-document delimiter must be a bare LF for sh
+    assert b"\r" not in (ROOT / "scripts" / "hooks" / "run.cmd").read_bytes()  # bare LF only
 
 
 def test_the_runner_and_wrappers_are_executable_in_git() -> None:

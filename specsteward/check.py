@@ -104,16 +104,21 @@ def project_python(root: Path) -> str:
 
 def _which(exe: str) -> str | None:
     """PATH lookup that never looks in the current directory (Windows does, by default)."""
-    key = "NoDefaultCurrentDirectoryInExePath"
-    previous = os.environ.get(key)
-    os.environ[key] = "1"
-    try:
+    if sys.platform != "win32":
         return shutil.which(exe)
-    finally:
-        if previous is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = previous
+    # Python before 3.12 ignores NoDefaultCurrentDirectoryInExePath, so look up PATH by hand.
+    here = os.path.normcase(os.path.abspath(os.curdir))
+    suffixes = (
+        [""] if Path(exe).suffix else [""] + os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";")
+    )
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        if not folder or os.path.normcase(os.path.abspath(folder)) == here:
+            continue
+        for suffix in suffixes:
+            candidate = os.path.join(folder.strip('"'), exe + suffix)
+            if os.path.isfile(candidate):
+                return candidate
+    return None
 
 
 def resolve_cmd(cmd: tuple[str, ...], root: Path) -> list[str]:

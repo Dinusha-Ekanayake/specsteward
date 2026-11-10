@@ -8,6 +8,10 @@
 ### Added
 - Red-before-green evidence: `[tdd] red_first` (`warn` by default, `enforce`, `off`). `sdd done` warns, or refuses, when a task group never had a failing test run before its passing one; `sdd done T --waive-red "reason"` records why no test applies.
 
+### Changed
+- `[scope] allow` patterns no longer treat `[` as a wildcard; write `?` or `*` instead of `[ab]`.
+- Config regexes with a repeated group that itself repeats (`(\d+\.)+\d+`) are refused at load time as a risk of runaway matching; rewrite them without the nesting.
+
 ### Security
 - Found by an independent audit and fixed:
   - The shell guard now looks through quoting, escapes, letter case, wildcards, `cd` into protected folders, `env`/`sudo`/`nohup` prefixes, `bash -lc`, here-documents and shells fed from a pipe, and asks for inline interpreter code that names run state or the environment. It also guards the Windows PowerShell tool (the hooks and the `ask` rules covered only Bash there).

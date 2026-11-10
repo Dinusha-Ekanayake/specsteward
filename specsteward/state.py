@@ -674,7 +674,7 @@ def _review_witnessed(state: State) -> bool:
     if not int(state.get("observed_agent_runs", 0)) and not state.get("hooks_live"):
         return True
     passed_at = _gate(state).get("passed_at")
-    if passed_at is not None and float(state.get("last_reviewer_at", 0)) < float(passed_at):
+    if passed_at is not None and float(state.get("last_reviewer_at", 0)) <= float(passed_at):
         return False  # the code passed the gate again after the last reviewer finished
     return int(state.get("observed_reviews", 0)) > int(state.get("accepted_reviews", 0))
 
