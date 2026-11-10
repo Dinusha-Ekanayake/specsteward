@@ -180,3 +180,24 @@ def test_shell_commands_that_write_the_allowlist_ask() -> None:
     assert _ask("echo '{}' > ~/.claude/channels/telegram/access.json")
     assert _ask("sed -i s/a/b/ ~/.claude/channels/discord/access.json")
     assert not _ask("cat ~/.claude/channels/telegram/access.json")
+
+
+# --- review verdicts need a witnessed reviewer ------------------------------------------------
+
+
+def test_a_clean_verdict_needs_a_reviewer_the_hook_saw(repo: Path) -> None:
+    from specsteward import state as run_state
+
+    cfg = config.load(repo)
+    run_state.start(cfg, "009", check_branch=False)
+    task = run_state.next_step(cfg)["tasks"][0]
+    run_state.record_review(cfg, task, "clean")  # no hook evidence yet: honour-based
+    state = run_state.require(repo)
+    state["observed_agent_runs"] = 1  # the hook works in this run, but no reviewer finished
+    run_state.save(repo, state)
+    with pytest.raises(ValueError, match="reviewer"):
+        run_state.record_review(cfg, task, "clean")
+    run_state.observe_agent(cfg, "specsteward:reviewer", None)
+    run_state.record_review(cfg, task, "clean")
+    with pytest.raises(ValueError, match="reviewer"):
+        run_state.record_review(cfg, task, "clean")  # one reviewer run, one verdict
