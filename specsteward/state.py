@@ -125,9 +125,19 @@ def require(root: Path) -> State:
     state = load(root)
     if state is None or not state["active"]:
         raise ValueError(
-            "no active specsteward run; approve and start one with `sdd approve <NNN> --start`"
+            "no active specsteward run; approve and start one with `sdd approve <NNN> --start` "
+            "(or `sdd start <NNN>` when the spec is already approved)"
         )
     return state
+
+
+def _not_halted(state: State) -> None:
+    """A halted run waits for the user: no verdict, agent run or tick is taken meanwhile."""
+    if state.get("halted"):
+        raise ValueError(
+            f"the run is halted ({state['halted']}); show the user why, and continue only "
+            "after they resume it with `sdd resume`"
+        )
 
 
 def tasks_path(root: Path, state: State) -> Path:
@@ -348,22 +358,37 @@ def approval_problem(cfg: Config, spec: str, directory: Path) -> str | None:
     return None
 
 
+def branch_problem(cfg: Config, spec: str) -> str | None:
+    """Why a run for ``spec`` cannot start on the checked-out branch, or None."""
+    prefix = cfg.branch_prefix.format(spec=spec)
+    if not prefix:
+        return None
+    allowed = [p for p in (prefix, cfg.fix_branch_prefix.format(spec=spec)) if p]
+    if any(current_branch(cfg.root).startswith(p) for p in allowed):
+        return None
+    return f"switch to a {' or '.join(p + '*' for p in allowed)} branch first"
+
+
 @locked
 def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
     """Start a fresh run. Refuses while a run is active, so counters are never wiped by accident."""
     current = load(cfg.root)
     if current is not None and current["active"]:
-        hint = "use `sdd resume`" if current["spec"] == spec else "run `sdd stop` first"
+        hint = (
+            "continue it with `sdd next` (`sdd claim` from a new session, `sdd resume` if it "
+            "is halted)"
+            if current["spec"] == spec
+            else "run `sdd stop` first"
+        )
         raise ValueError(f"a run for spec {current['spec']} is already active; {hint}")
     directory = cfg.spec_dir(spec)
     problem = approval_problem(cfg, spec, directory)
     if problem:
         raise ValueError(problem)
-    prefix = cfg.branch_prefix.format(spec=spec)
-    if check_branch and prefix:
-        allowed = [p for p in (prefix, cfg.fix_branch_prefix.format(spec=spec)) if p]
-        if not any(current_branch(cfg.root).startswith(p) for p in allowed):
-            raise ValueError(f"switch to a {' or '.join(p + '*' for p in allowed)} branch first")
+    if check_branch:
+        wrong = branch_problem(cfg, spec)
+        if wrong:
+            raise ValueError(wrong)
     tasks = parse_tasks(directory / "tasks.md")  # fail early on a malformed table
     trust.record_ticks(cfg.root, spec, {t.id: t.status for t in tasks})
     trust.record_guard(cfg.root, cfg.guard)  # baseline for the gate config check
@@ -472,6 +497,7 @@ OUR_AGENT_PREFIXES = ("specsteward:", "sdd-pilot:")
 @locked
 def record_agent(cfg: Config, role: str, fresh: bool) -> State:
     state = require(cfg.root)
+    _not_halted(state)
     state["agent_runs"] += 1
     state["last_agent_at"] = time.time()
     if role == "implementer" and fresh:
@@ -687,6 +713,7 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
     if verdict not in ("clean", "changes"):
         raise ValueError("verdict must be 'clean' or 'changes'")
     state = require(cfg.root)
+    _not_halted(state)
     group = _gate(state)["group"]
     if group and task_id not in group:
         raise ValueError(f"{task_id} is not in the group in flight ({group}); review that group")
@@ -749,6 +776,7 @@ def red_warning(cfg: Config, state: State, task_id: str) -> str | None:
 def complete(cfg: Config, task_id: str, human: bool = False, waive_red: str | None = None) -> State:
     """Tick a task, but only after a passing gate and a clean review of the current tree."""
     state = require(cfg.root)
+    _not_halted(state)
     path = tasks_path(cfg.root, state)
     problem = integrity_problem(cfg, state)
     if problem:

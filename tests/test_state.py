@@ -143,7 +143,7 @@ def test_approval_follows_spec_edits(repo: Path, cfg: config.Config) -> None:
 def test_start_refuses_while_a_run_is_active(cfg: config.Config) -> None:
     _start(cfg)
     run_state.record_failure(cfg, "T-009-02", "abc")
-    with pytest.raises(ValueError, match="already active; use `sdd resume`"):
+    with pytest.raises(ValueError, match="already active; continue it with `sdd next`"):
         _start(cfg)  # would otherwise wipe the failure counters
     assert run_state.require(cfg.root)["tasks"]["T-009-02"]["fix_attempts"] == 1
     run_state.stop(cfg.root)
@@ -224,8 +224,24 @@ def test_changes_verdict_clears_the_review(cfg: config.Config) -> None:
     run_state.record_pass(cfg)
     run_state.record_review(cfg, first, "clean")
     run_state.record_review(cfg, first, "changes")
+    with pytest.raises(ValueError, match="the run is halted"):  # the review-round cap
+        run_state.complete(cfg, first)
+    run_state.resume(cfg.root)
     with pytest.raises(ValueError, match="no clean review"):
         run_state.complete(cfg, first)
+
+
+def test_a_halted_run_takes_no_verdict_agent_run_or_tick(cfg: config.Config) -> None:
+    first, _ = _group_ready(cfg)
+    run_state.record_pass(cfg)
+    run_state.halt(cfg.root, run_state.require(cfg.root), "the user must decide")
+    for action in (
+        lambda: run_state.record_review(cfg, first, "clean"),
+        lambda: run_state.record_agent(cfg, "implementer", False),
+        lambda: run_state.complete(cfg, first),
+    ):
+        with pytest.raises(ValueError, match="halted .the user must decide"):
+            action()
 
 
 def test_done_refuses_tasks_outside_the_group(cfg: config.Config) -> None:

@@ -167,68 +167,79 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(
         dest="command", prog="sdd", required=True, metavar="<command>", help=argparse.SUPPRESS
     )
-    init = sub.add_parser("init", help=_help("init"))
-    init.add_argument("--preset", choices=PRESETS, default="auto")
-    init.add_argument("--specs-dir", default="specs")
-    init.add_argument("--force", action="store_true")
+    init = sub.add_parser("init", help=_help("init"), description=_help("init"))
+    init.add_argument(
+        "--preset", choices=PRESETS, default="auto", help="stack to set up (default: detect it)"
+    )
+    init.add_argument("--specs-dir", default="specs", help="folder for the specs (default: specs)")
+    init.add_argument("--force", action="store_true", help="overwrite sdd.toml and the templates")
     init.add_argument("--statusline", action="store_true", help="show the run in the status line")
-    check = sub.add_parser("check", help=_help("check"))
+    check = sub.add_parser("check", help=_help("check"), description=_help("check"))
     check.add_argument(
         "--task", help="the orchestrator's gate: count failures for this task's caps"
     )
-    brief = sub.add_parser("brief", help=_help("brief"))
-    brief.add_argument("tasks", nargs="+")
-    start = sub.add_parser("start", help=_help("start"))
-    start.add_argument("spec")
-    start.add_argument("--no-branch-check", action="store_true")
-    approve = sub.add_parser("approve", help=_help("approve"))
-    approve.add_argument("spec")
-    approve.add_argument("--via", default="terminal")
+    brief = sub.add_parser("brief", help=_help("brief"), description=_help("brief"))
+    brief.add_argument("tasks", nargs="+", help="task ids of one group, for example T-003-01")
+    start = sub.add_parser("start", help=_help("start"), description=_help("start"))
+    start.add_argument("spec", help="three-digit spec number, for example 003")
+    start.add_argument("--no-branch-check", action="store_true", help="start on any branch")
+    approve = sub.add_parser("approve", help=_help("approve"), description=_help("approve"))
+    approve.add_argument("spec", help="three-digit spec number, for example 003")
+    approve.add_argument(
+        "--via",
+        default="terminal",
+        help="where the approval came from: terminal, telegram, discord",
+    )
     approve.add_argument("--start", action="store_true", help="start the run right after")
-    approve.add_argument("--no-branch-check", action="store_true")
+    approve.add_argument(
+        "--no-branch-check", action="store_true", help="with --start: start on any branch"
+    )
     approve.add_argument("--anyway", action="store_true", help="approve despite CRITICAL findings")
-    worktree = sub.add_parser("worktree", help=_help("worktree"))
-    worktree.add_argument("spec")
-    sub.add_parser("converge", help=_help("converge"))
-    analyze_cmd = sub.add_parser("analyze", help=_help("analyze"))
-    analyze_cmd.add_argument("spec")
-    agent = sub.add_parser("agent", help=_help("agent"))
+    worktree = sub.add_parser("worktree", help=_help("worktree"), description=_help("worktree"))
+    worktree.add_argument("spec", help="three-digit spec number, for example 003")
+    sub.add_parser("converge", help=_help("converge"), description=_help("converge"))
+    analyze_cmd = sub.add_parser("analyze", help=_help("analyze"), description=_help("analyze"))
+    analyze_cmd.add_argument("spec", help="three-digit spec number, for example 003")
+    agent = sub.add_parser("agent", help=_help("agent"), description=_help("agent"))
     agent.add_argument("role", choices=("planner", "implementer", "reviewer", "converger", "clerk"))
-    agent.add_argument("--fresh", action="store_true")
-    sub.add_parser("scope", help=_help("scope"))
-    review = sub.add_parser("review", help=_help("review"))
-    review.add_argument("task")
+    agent.add_argument("--fresh", action="store_true", help="a new implementer was started")
+    sub.add_parser("scope", help=_help("scope"), description=_help("scope"))
+    review = sub.add_parser("review", help=_help("review"), description=_help("review"))
+    review.add_argument("task", help="task id, for example T-003-01")
     review.add_argument("verdict", choices=("clean", "changes"))
-    done = sub.add_parser("done", help=_help("done"))
-    done.add_argument("task")
+    done = sub.add_parser("done", help=_help("done"), description=_help("done"))
+    done.add_argument("task", help="task id, for example T-003-01")
     done.add_argument("--human", action="store_true", help="mark [?]: needs sign-off")
     done.add_argument("--waive-red", metavar="REASON", help="no failing test applies; say why")
-    assume = sub.add_parser("assume", help=_help("assume"))
-    assume.add_argument("task")
-    assume.add_argument("text")
-    sub.add_parser("halt", help=_help("halt")).add_argument("reason")
-    status = sub.add_parser("status", help=_help("status"))
-    status.add_argument("--json", action="store_true")
-    signoff = sub.add_parser("signoff", help=_help("signoff"))
-    signoff.add_argument("task")
-    sub.add_parser("claim", help=_help("claim"))
-    sub.add_parser("trust", help=_help("trust"))
-    graph_cmd = sub.add_parser("graph", help=_help("graph"))
+    assume = sub.add_parser("assume", help=_help("assume"), description=_help("assume"))
+    assume.add_argument("task", help="task id, for example T-003-01")
+    assume.add_argument("text", help="the assumption, in one sentence")
+    halt = sub.add_parser("halt", help=_help("halt"), description=_help("halt"))
+    halt.add_argument("reason", help="why the run stops, and what the user must decide")
+    status = sub.add_parser("status", help=_help("status"), description=_help("status"))
+    status.add_argument("--json", action="store_true", help="machine-readable output")
+    signoff = sub.add_parser("signoff", help=_help("signoff"), description=_help("signoff"))
+    signoff.add_argument("task", help="task id, for example T-003-01")
+    sub.add_parser("claim", help=_help("claim"), description=_help("claim"))
+    sub.add_parser("trust", help=_help("trust"), description=_help("trust"))
+    graph_cmd = sub.add_parser("graph", help=_help("graph"), description=_help("graph"))
     graph_cmd.add_argument("action", choices=("status", "sync"))
-    sub.add_parser("statusline", help=_help("statusline"))
-    sub.add_parser("dashboard", help=_help("dashboard"))
-    phone_cmd = sub.add_parser("phone", help=_help("phone"))
+    sub.add_parser("statusline", help=_help("statusline"), description=_help("statusline"))
+    sub.add_parser("dashboard", help=_help("dashboard"), description=_help("dashboard"))
+    phone_cmd = sub.add_parser("phone", help=_help("phone"), description=_help("phone"))
     phone_cmd.add_argument("action", choices=("setup", "lock"))
-    phone_cmd.add_argument("--channel", choices=("telegram", "discord"), default="telegram")
+    phone_cmd.add_argument(
+        "--channel", choices=("telegram", "discord"), default="telegram", help="which chat app"
+    )
     phone_cmd.add_argument(
         "--no-input", action="store_true", help="no questions: only the automatic steps"
     )
-    install = sub.add_parser("install", help=_help("install"))
+    install = sub.add_parser("install", help=_help("install"), description=_help("install"))
     install.add_argument("tool", choices=("bun",))
-    doctor = sub.add_parser("doctor", help=_help("doctor"))
-    doctor.add_argument("--json", action="store_true")
+    doctor = sub.add_parser("doctor", help=_help("doctor"), description=_help("doctor"))
+    doctor.add_argument("--json", action="store_true", help="machine-readable output")
     for name in ("next", "resume", "stop", "remote"):
-        sub.add_parser(name, help=_help(name))
+        sub.add_parser(name, help=_help(name), description=_help(name))
     for name in HOOKS:  # called by Claude Code, not by people
         sub.add_parser(name)
     return parser
@@ -449,10 +460,15 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         if any(f.level == "CRITICAL" for f in found) and not args.anyway:
             print(format_analysis(cfg.spec_dir(args.spec), found))
             raise ValueError("resolve the CRITICAL findings first (or pass --anyway)")
+        current = run_state.load(root)
+        resuming = bool(current and current["active"] and current["spec"] == args.spec)
+        if args.start and not resuming and not args.no_branch_check:
+            wrong = run_state.branch_problem(cfg, args.spec)
+            if wrong:  # before approving, so a refusal leaves nothing half done
+                raise ValueError(f"{wrong}; nothing was approved")
         print(f"spec {args.spec}: {run_state.approve(cfg, args.spec, args.via)}")
         if args.start:  # one permission prompt for "approve and go", e.g. from a phone
-            current = run_state.load(root)
-            if current and current["active"] and current["spec"] == args.spec:
+            if resuming:
                 state = run_state.resume(root)  # tasks were added mid-run, e.g. by converge
             else:
                 state = run_state.start(cfg, args.spec, not args.no_branch_check)
@@ -517,6 +533,9 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         note = run_state.red_warning(cfg, state, args.task)
         if note:
             print(f"warning: {note}", file=sys.stderr)
+    if command == "done" and cfg.scope_mode == "warn":
+        for outside in scope_mod.out_of_scope(cfg, state):
+            print(f"warning: outside the plan: {outside}", file=sys.stderr)
     if command == "done" and cfg.symbol_mode == "warn":
         for name in scope_mod.unplanned_symbols(cfg, state):
             note = f"warning: unplanned change {name}; name it in the plan or revert"
@@ -560,6 +579,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_command(args, cfg_mod.load(_start_dir()))
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
+        return 2
+    except (TypeError, KeyError, AttributeError) as error:
+        # A value of the wrong kind in sdd.toml or a spec file: say so, without a traceback.
+        print(f"error: unexpected value ({type(error).__name__}: {error})", file=sys.stderr)
+        print("check sdd.toml against docs/configuration.md, or run `sdd doctor`", file=sys.stderr)
         return 2
 
 

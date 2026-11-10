@@ -7,7 +7,7 @@ which risk, and the caps that stop runaway loops.
 
 import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +137,35 @@ MAX_STATUS_TEXT = 200_000  # the status line is near the top; never scan a huge 
 def _tuple(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
-    return tuple(str(v) for v in value or ())
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"sdd.toml: expected a string or a list of strings, got {value!r}")
+    return tuple(str(v) for v in value)
+
+
+def _whole(table: dict[str, Any], section: str, key: str, default: int, least: int = 1) -> int:
+    value = table.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < least:
+        raise ValueError(
+            f"[{section}] {key} must be a whole number, {least} or more, got {value!r}"
+        )
+    return value
+
+
+def _limits(raw: dict[str, Any]) -> Limits:
+    known = {f.name for f in fields(Limits)}
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise ValueError(
+            f"[limits] has no key {unknown[0]!r}; the keys are {', '.join(sorted(known))}"
+        )
+    return Limits(
+        **{
+            key: _whole(raw, "limits", key, getattr(Limits, key), 0 if key == "max_tokens" else 1)
+            for key in known
+        }
+    )
 
 
 def _review_skip(raw: dict[str, Any]) -> tuple[str, ...]:
@@ -202,9 +230,12 @@ def _steps(raw: list[dict[str, Any]]) -> tuple[CheckStep, ...]:
             raise ValueError("each [[check]] step needs a name and a cmd list")
         if isinstance(item["cmd"], str) or not item["cmd"]:
             raise ValueError(f"check step {item['name']!r}: cmd must be a non-empty list")
-        timeout = int(item.get("timeout", CheckStep.timeout))
-        if timeout < 1:
-            raise ValueError(f"check step {item['name']!r}: timeout must be at least 1")
+        timeout = item.get("timeout", CheckStep.timeout)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+            raise ValueError(
+                f"check step {item['name']!r}: timeout must be a whole number of seconds, "
+                f"1 or more, got {timeout!r}"
+            )
         keep = str(item.get("keep", ""))
         _regex(keep, f"check step {item['name']!r} keep")
         steps.append(CheckStep(str(item["name"]), _tuple(item["cmd"]), keep, timeout))
@@ -239,10 +270,14 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
         if not isinstance(raw.get(name, {}), dict):
             raise ValueError(f"[{name}] must be a table, for example `[{name}]` on its own line")
     project = raw.get("project", {})
-    limits = Limits(**raw.get("limits", {}))
-    counts = {k: v for k, v in vars(limits).items() if k != "max_tokens"}
-    if min(counts.values()) < 1 or limits.max_tokens < 0:
-        raise ValueError("[limits] values must be at least 1 (max_tokens: 0 or more)")
+    limits = _limits(raw.get("limits", {}))
+    for key in ("branch_prefix", "fix_branch_prefix"):
+        try:
+            str(project.get(key, "")).format(spec="000")
+        except (KeyError, IndexError, ValueError):
+            raise ValueError(
+                f"[project] {key} may only use the placeholder {{spec}}, as in 'feature/{{spec}}-'"
+            ) from None
     wording_raw = raw.get("wording", {})
     for pattern in _tuple(wording_raw.get("banned")):
         _regex(pattern, "[wording] banned")
@@ -299,8 +334,8 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
         ),
         limits=limits,
         models=_models(raw.get("models", {})),
-        max_group=int(groups.get("max_size", 3)),
-        max_group_high=int(groups.get("max_high", 2)),
+        max_group=_whole(groups, "groups", "max_size", 3),
+        max_group_high=_whole(groups, "groups", "max_high", 2),
         helper_files=_tuple(brief.get("helper_files")),
         path_roots=_tuple(brief.get("path_roots", ())),
         graphify=bool(brief.get("graphify", True)),
