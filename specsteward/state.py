@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from functools import wraps
 from pathlib import Path
@@ -727,14 +727,19 @@ def done_problem(cfg: Config, state: State, task_id: str, risk: str = "high") ->
     return tdd_problem(cfg, state, task_id, risk) if cfg.tdd_mode == "enforce" else None
 
 
+def _task_risk(cfg: Config, state: State, task_id: str) -> str:
+    """The task's risk from tasks.md; the strictest one when the table cannot be read."""
+    try:
+        return {t.id: t.risk for t in parse_tasks(tasks_path(cfg.root, state))}.get(task_id, "high")
+    except (OSError, ValueError):
+        return "high"
+
+
 def red_warning(cfg: Config, state: State, task_id: str) -> str | None:
     """Warn mode: the same finding, shown but not blocking."""
     if cfg.tdd_mode != "warn":
         return None
-    risk = "high"
-    with suppress(OSError, ValueError):  # an unreadable table: assume the strictest risk
-        risk = {t.id: t.risk for t in parse_tasks(tasks_path(cfg.root, state))}.get(task_id, "high")
-    return tdd_problem(cfg, state, task_id, risk)
+    return tdd_problem(cfg, state, task_id, _task_risk(cfg, state, task_id))
 
 
 @locked
