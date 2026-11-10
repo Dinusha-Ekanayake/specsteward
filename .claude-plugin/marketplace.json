@@ -10,7 +10,7 @@
       "source": "./",
       "description": "Spec-driven development on autopilot for Claude Code, with tamper-proof human gates and phone approvals over Telegram or Discord.",
       "category": "development",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "homepage": "https://github.com/Dinusha-Ekanayake/specsteward",
       "license": "MIT"
     }

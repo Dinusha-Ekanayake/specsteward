@@ -307,3 +307,71 @@ def test_scope_can_warn_or_be_off(repo: Path) -> None:
     assert from_dict(repo, {"scope": {"mode": "warn"}}).scope_mode == "warn"
     with pytest.raises(ValueError, match="scope"):
         from_dict(repo, {"scope": {"mode": "loose"}})
+
+
+# --- symbols: growth inside a planned file --------------------------------------------------
+
+
+def _symbol_project(repo: Path, plan_extra: str = "") -> tuple[config.Config, dict]:
+    from specsteward import state as run_state
+
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "mod.py").write_text(
+        "def login():\n    return 1\n\n\ndef other():\n    return 2\n", encoding="utf-8"
+    )
+    plan = repo / "specs" / "009-demo" / "plan.md"
+    plan.write_text("# Plan\n\n| `src/mod.py` | one |\n" + plan_extra, encoding="utf-8")
+    cfg = config.load(repo)
+    _git_repo(repo)
+    run_state.approve(cfg, "009", "test")
+    run_state.start(cfg, "009", check_branch=False)
+    return cfg, run_state.require(repo)
+
+
+def test_unplanned_public_symbols_in_a_planned_file_are_found(repo: Path) -> None:
+    from specsteward import scope
+
+    cfg, run = _symbol_project(repo)
+    (repo / "src" / "mod.py").write_text(
+        "def login():\n    return 1\n\n\ndef other():\n    return 3\n\n\n"
+        "def sneaky():\n    return 4\n\n\ndef _private():\n    return 5\n",
+        encoding="utf-8",
+    )
+    assert scope.unplanned_symbols(cfg, run) == ["src/mod.py::other", "src/mod.py::sneaky"]
+
+
+def test_symbols_the_plan_names_are_allowed(repo: Path) -> None:
+    from specsteward import scope
+
+    cfg, run = _symbol_project(repo, "Adds `other()` and `sneaky`.\n")
+    (repo / "src" / "mod.py").write_text(
+        "def login():\n    return 1\n\n\ndef other():\n    return 3\n\n\n"
+        "def sneaky():\n    return 4\n",
+        encoding="utf-8",
+    )
+    assert scope.unplanned_symbols(cfg, run) == []
+
+
+def test_symbol_mode_enforce_blocks_and_warn_does_not(repo: Path) -> None:
+    from dataclasses import replace
+
+    from specsteward import scope
+
+    cfg, run = _symbol_project(repo)
+    (repo / "src" / "mod.py").write_text("def extra():\n    return 1\n", encoding="utf-8")
+    assert scope.problem(cfg, run) is None  # warn is the default
+    strict = replace(cfg, symbol_mode="enforce")
+    assert "unplanned changes inside planned files" in str(scope.problem(strict, run))
+    assert scope.unplanned_symbols(replace(cfg, symbol_mode="off"), run) == []
+
+
+def test_javascript_exports_and_bad_symbol_mode() -> None:
+    from specsteward.config import from_dict
+    from specsteward.scope import _symbols
+
+    assert set(_symbols("a.ts", "export function a() {}\nexport const b = 1\nfunction c() {}")) == {
+        "a",
+        "b",
+    }
+    with pytest.raises(ValueError, match="symbols"):
+        from_dict(Path("."), {"scope": {"symbols": "x"}})

@@ -80,11 +80,14 @@ Only `"low"` is allowed. High and human risk are always reviewed.
 
 ```toml
 [scope]
-mode = "enforce"        # enforce | warn | off
+mode = "enforce"        # enforce | warn | off: files outside the plan
+symbols = "warn"        # enforce | warn | off: public symbols the plan does not name
 allow = ["docs/**"]     # extra globs a run may always touch
 ```
 
 The approval hash proves the spec, plan and task table did not change. It cannot see code wandering outside them, so `sdd done` also compares the files changed since the run started with the files the approved plan names in backticks (the `Modules / files` table). Tests, `CHANGELOG*` and the spec folder are always allowed. In `enforce` mode a task is not ticked while anything else has changed; `sdd scope` lists the files. To widen the scope, add the file to `plan.md`: that changes the approved plan, so the spec has to be approved again before the run goes on. `warn` only lists them; a plan that names no files is not checked.
+
+`symbols` goes one level deeper, inside files the plan does name: a public function, class or method that a run adds or changes in a file that existed before the run must be mentioned in backticks in `plan.md` or `tasks.md` (`` `login()` ``, `` `Auth.login` ``). Private names (leading underscore), new files and tests are not checked. Python is compared by syntax tree (a moved or reformatted function is not a change); JavaScript and TypeScript only see new `export`s. The default is `warn`, which prints the names on `sdd done`; `enforce` makes `sdd done` refuse until they are named, which changes the plan and so needs approval again.
 
 ## `[limits]`
 

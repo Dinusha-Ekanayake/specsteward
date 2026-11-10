@@ -7,6 +7,7 @@ To widen the scope, the plan has to change, which breaks the approval digest, so
 approves again before the run can go on.
 """
 
+import ast
 import re
 import subprocess
 from fnmatch import fnmatchcase
@@ -114,12 +115,127 @@ def out_of_scope(cfg: Config, state: dict[str, Any]) -> list[str]:
 def problem(cfg: Config, state: dict[str, Any]) -> str | None:
     """Why the tree is out of scope (enforce mode only), or None."""
     if cfg.scope_mode != "enforce":
-        return None
+        return symbol_problem(cfg, state)
     extra = out_of_scope(cfg, state)
     if not extra:
-        return None
+        return symbol_problem(cfg, state)
     shown = ", ".join(extra[:6]) + (f" and {len(extra) - 6} more" if len(extra) > 6 else "")
     return (
         f"changes outside the approved plan: {shown}. Revert them, or add the files to "
         f"{state['spec_dir']}/plan.md and ask the user to approve the spec again"
+    )
+
+
+# --- symbols: growth inside a file the plan already names ---------------------------------
+
+_IDENT = re.compile(r"[A-Za-z_]\w*")
+_JS_DECL = re.compile(
+    r"^export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|interface|type|enum)\s+(\w+)",
+    re.MULTILINE,
+)
+
+
+def named_symbols(*texts: str) -> set[str]:
+    """Identifiers the plan and tasks mention in backticks (`login`, `Auth.login()`, `a.py::f`)."""
+    names: set[str] = set()
+    for text in texts:
+        for token in _BACKTICKED.findall(text):
+            names.update(_IDENT.findall(token))
+    return names
+
+
+def _py_symbols(source: str) -> dict[str, str]:
+    """Public top-level functions, classes and methods, each with a hash of its code."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return {}
+    found: dict[str, str] = {}
+    funcs = (ast.FunctionDef, ast.AsyncFunctionDef)
+    for node in tree.body:
+        if not isinstance(node, (*funcs, ast.ClassDef)) or node.name.startswith("_"):
+            continue
+        if isinstance(node, ast.ClassDef):
+            methods = [item for item in node.body if isinstance(item, funcs)]
+            node.body = [item for item in node.body if not isinstance(item, funcs)] or [ast.Pass()]
+            for method in methods:
+                if not method.name.startswith("_"):
+                    found[f"{node.name}.{method.name}"] = ast.dump(method)
+        found[node.name] = ast.dump(node)
+    return found
+
+
+def _js_symbols(source: str) -> dict[str, str]:
+    """Exported names only; a changed body is not seen, a new export is."""
+    return {name: "" for name in _JS_DECL.findall(source) if not name.startswith("_")}
+
+
+def _symbols(path: str, source: str) -> dict[str, str]:
+    if path.endswith(".py"):
+        return _py_symbols(source)
+    if path.endswith((".js", ".jsx", ".ts", ".tsx", ".mjs")):
+        return _js_symbols(source)
+    return {}
+
+
+def _text_at(root: Path, base: str, path: str) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "show", f"{base}:{path}"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError:
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def unplanned_symbols(cfg: Config, state: dict[str, Any]) -> list[str]:
+    """Public symbols added or changed in files that existed before the run and that neither
+    the plan nor the tasks name. New files are not checked: the plan names the file."""
+    if cfg.symbol_mode == "off":
+        return []
+    spec_dir = cfg.root / str(state["spec_dir"])
+    plan = spec_dir / "plan.md"
+    start = state.get("scope") or {}
+    base = start.get("base")
+    if not base or not plan.exists():
+        return []
+    plan_text = plan.read_text(encoding="utf-8")
+    tasks = spec_dir / "tasks.md"
+    named = named_symbols(plan_text, tasks.read_text(encoding="utf-8") if tasks.exists() else "")
+    planned = planned_paths(plan_text)
+    out: list[str] = []
+    for path in sorted(_changed_now(cfg.root, base) - set(start.get("dirty", []))):
+        file = cfg.root / path
+        if _ignored(path) or not file.is_file() or any(_matches(path, a) for a in DEFAULT_ALLOW):
+            continue
+        if not any(_matches(path, pattern) for pattern in planned):
+            continue  # outside the plan: the file check reports it
+        before = _text_at(cfg.root, base, path)
+        if before is None:
+            continue
+        old = _symbols(path, before)
+        new = _symbols(path, file.read_text(encoding="utf-8", errors="replace"))
+        for name, digest in new.items():
+            if old.get(name) != digest and not ({name, name.split(".")[-1]} & named):
+                out.append(f"{path}::{name}")
+    return out
+
+
+def symbol_problem(cfg: Config, state: dict[str, Any]) -> str | None:
+    if cfg.symbol_mode != "enforce":
+        return None
+    extra = unplanned_symbols(cfg, state)
+    if not extra:
+        return None
+    shown = ", ".join(extra[:6]) + (f" and {len(extra) - 6} more" if len(extra) > 6 else "")
+    return (
+        f"unplanned changes inside planned files: {shown}. Name them in "
+        f"{state['spec_dir']}/plan.md or tasks.md in backticks and ask the user to approve again, "
+        "or revert them"
     )

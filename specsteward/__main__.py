@@ -450,8 +450,13 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
     if command == "scope":
         run = run_state.require(root)
         extra = scope_mod.out_of_scope(cfg, run)
-        print("\n".join(extra) if extra else "all changes are inside the approved plan")
-        return 1 if extra and cfg.scope_mode == "enforce" else 0
+        symbols = scope_mod.unplanned_symbols(cfg, run)
+        lines = [*extra, *(f"unplanned symbol {name}" for name in symbols)]
+        print("\n".join(lines) if lines else "all changes are inside the approved plan")
+        failing = (extra and cfg.scope_mode == "enforce") or (
+            symbols and cfg.symbol_mode == "enforce"
+        )
+        return 1 if failing else 0
     if command == "remote":
         print(json.dumps(remote_status(), indent=2))
         return 0
@@ -468,6 +473,10 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         "stop": lambda: run_state.stop(root),
     }
     state = actions[command]()
+    if command == "done" and cfg.symbol_mode == "warn":
+        for name in scope_mod.unplanned_symbols(cfg, state):
+            note = f"warning: unplanned change {name}; name it in the plan or revert"
+            print(note, file=sys.stderr)
     print(json.dumps({k: state[k] for k in ("spec", "active", "halted", "agent_runs")}))
     return 0
 
