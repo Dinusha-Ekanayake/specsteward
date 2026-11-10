@@ -34,7 +34,7 @@ Long agent runs fail in predictable ways. specsteward has a mitigation for each:
 |---|---|
 | Every subagent re-reads the whole spec | A generated **brief** per task group: the task rows, matching plan lines, requirements and signatures of related code, capped in size |
 | Agents read files one by one | A **graphify code graph** is installed, built and kept fresh automatically; agents query it first |
-| Reviewing everything with the biggest model is expensive | **Risk tags** (`low`, `high`, `human`) pick the reviewer model; high-risk reviews also write one adversarial test |
+| Reviewing everything with the biggest model is expensive | **Risk tags** (`low`, `high`, `human`) pick the reviewer model; high-risk reviews are asked to write one adversarial test (an instruction to the reviewer, not a check the gate enforces) |
 | Lint and test output floods the context | One **gate** command prints a 2-line summary plus only the failing lines |
 | Loops that never converge | Halts on the same failure twice, too many fix attempts, a second review round with open findings, an agent-run cap (counted by a hook), or no progress between automatic continues. Resetting a cap needs your permission |
 | Agents working around the gate | Approval is bound to the spec's content; `done` needs a passing gate and a clean review of the current code; gate config changes fail the check; run state cannot be edited; gate commands and writes to run state ask you however they are spelled |
@@ -54,7 +54,7 @@ Long agent runs fail in predictable ways. specsteward has a mitigation for each:
 |---|---|
 | Features of several steps, where you want the plan agreed first and every step tested and reviewed | One-line fixes, renames, quick questions: a spec and an approval would only slow you down |
 | Long runs you do not want to babysit: caps stop loops, halts ask you, and the phone pings you | Exploring or prototyping, where the goal is still moving |
-| Code where a silent wrong guess is costly (data, money, security): risky tasks get the stronger reviewer and an adversarial test | Throwaway scripts |
+| Code where a silent wrong guess is costly (data, money, security): risky tasks get the stronger reviewer, who is asked for an adversarial test | Throwaway scripts |
 | Bugs worth a regression test: `/specsteward:run fix "<bug>"` writes the failing test first | Changes you can check by eye in a minute |
 
 Day to day you use three things: `/specsteward:run plan <topic>`, approve, and `/specsteward:run <NNN>`. The other commands are for the agents or for setup.

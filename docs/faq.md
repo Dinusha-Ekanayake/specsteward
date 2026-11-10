@@ -159,7 +159,7 @@ A file that configures the gate (lint, type, test or coverage settings) changed 
 The task table needs `| ID | Task | Test | Risk | Status |`, with Status last.
 
 **Tests pass but the code is wrong.**
-The gate proves consistency, not correctness. Strengthen the acceptance criteria, mark the task `high` risk (Opus review plus an adversarial test), and add the rule to `specs/constitution.md`.
+The gate proves consistency, not correctness. Strengthen the acceptance criteria, mark the task `high` risk (Opus review, and the reviewer is asked for an adversarial test; the gate does not check that it did), and add the rule to `specs/constitution.md`.
 
 ## Phone control problems
 

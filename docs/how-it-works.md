@@ -6,7 +6,7 @@
 |---|---|
 | `agents/planner.md` (Opus) | Drafts spec, plan, tasks. Never approves |
 | `agents/implementer.md` (Sonnet) | TDD for one task group from a brief; reused across groups, restarted every few tasks |
-| `agents/reviewer.md` (Sonnet or Opus) | Reviews the diff against the brief; Opus plus an adversarial test on high-risk tasks |
+| `agents/reviewer.md` (Sonnet or Opus) | Reviews the diff against the brief; Opus on high-risk tasks, which it is also asked to probe with one adversarial test (not enforced by the gate) |
 | `agents/converger.md` (Opus) | After the last task: compares the code with the spec, plan and constitution and appends the missing work as new tasks (append-only) |
 | `agents/clerk.md` (Haiku) | Changelog, dev log and PR draft |
 | `skills/run` | The orchestration loop and the phone command table |
