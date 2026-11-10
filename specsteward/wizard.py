@@ -9,6 +9,9 @@ still happens through the plugin, because reading Discord DMs needs a live gatew
 
 import getpass
 import json
+import os
+import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -106,6 +109,8 @@ def locked_account(access_file: Path) -> str:
 
 def write_lock(access_file: Path, user_id: str) -> int:
     """Only ``user_id`` may use the bot. Keeps group settings; returns accounts removed."""
+    if access_file.exists() and not _access(access_file) and access_file.stat().st_size:
+        access_file.replace(access_file.with_name(access_file.name + ".bak"))  # keep what was there
     access = _access(access_file)
     before = access.get("allowFrom")
     removed = len([i for i in before if str(i) != user_id]) if isinstance(before, list) else 0
@@ -150,7 +155,12 @@ def _save(channel: Channel, token: str, console: Console) -> None:
         console.say(f"ok   token saved in {secret_store.LABELS[kind]}{extra}")
         return
     write_token(env_file, channel.token_var, token)
-    console.say(f"warn no credential store works here; token saved owner-only to {env_file}")
+    where = (
+        "plain text, protected only by your user profile folder"
+        if sys.platform == "win32"
+        else "owner-only"
+    )
+    console.say(f"warn no credential store works here; token saved ({where}) to {env_file}")
     if sys.platform.startswith("linux"):
         console.say("     to keep it encrypted: install secret-tool (libsecret) and a keyring")
 
@@ -166,6 +176,9 @@ def _token(
         try:
             name = _check(channel, existing, telegram)
         except bots.BotError as error:
+            if error.unreachable:
+                console.say(f"FAIL {error}; the saved token was kept, try again when online")
+                return None
             console.say(f"warn the saved token no longer works: {error}")
         else:
             if console.yes(f"Use the bot you already set up, @{name}?", True):
@@ -192,25 +205,39 @@ def _token(
     return None
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
+
+
+def _pairing_code() -> str:
+    return secrets.token_hex(3)
+
+
+def _plain(text: str, limit: int = 40) -> str:
+    """Text from a stranger, safe to print: no escape or bidi characters, cut short."""
+    return _CONTROL.sub("?", text)[:limit]
+
+
 def _wait_for_you(
     api: bots.Telegram, bot: str, console: Console, clock: Callable[[], float]
 ) -> str | None:
     offset = api.skip_backlog()
+    code = _pairing_code()
     console.say()
-    console.say(f"Now send any message to @{bot} in Telegram (waiting up to 3 minutes)...")
+    console.say(f"Now send this code to @{bot} in Telegram: {code}")
+    console.say("(only the message with exactly this code pairs; waiting up to 3 minutes)")
     deadline = clock() + PAIR_SECONDS
     while clock() < deadline:
         offset, sender = api.next_private_message(offset)
         if sender is None:
             continue
-        preview = sender.text[:40]
-        question = (
-            f"Message from {sender.name}, account {sender.user_id}: {preview!r}. Is this you?"
-        )
-        if console.yes(question, False):
+        if sender.text.strip().lower() == code:
+            console.say(f"ok   code received from account {sender.user_id}")
             api.acknowledge(offset)
             return sender.user_id
-        console.say("Ignored. Waiting for your message...")
+        console.say(
+            f"Ignored a message from account {_plain(sender.user_id)} "
+            "(wrong code). Waiting for yours..."
+        )
     api.acknowledge(offset)
     console.say("FAIL no message arrived; run `sdd phone setup` again")
     return None
@@ -256,10 +283,21 @@ def _old_copies(channel: Channel, console: Console) -> None:
         )
 
 
+def _bash() -> str:
+    """bash for the launcher; on Windows not the WSL stub in System32, which cannot run it."""
+    found = shutil.which("bash")
+    if found and sys.platform == "win32" and "system32" in found.lower().replace("\\", "/"):
+        for root in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)")):
+            candidate = Path(root or "") / "Git" / "bin" / "bash.exe"
+            if root and candidate.exists():
+                return str(candidate)
+        return "bash"
+    return found or "bash"
+
+
 def launch_phone() -> int:
     script = phone.launcher_dir() / phone.LAUNCHER
-    bash = shutil.which("bash") or "bash"
-    return subprocess.call([bash, str(script)])  # noqa: S603 - our own launcher
+    return subprocess.call([_bash(), str(script)])  # noqa: S603 - our own launcher
 
 
 def run(

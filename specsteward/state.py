@@ -504,6 +504,7 @@ def observe_agent(
     state["observed_agent_runs"] = int(state.get("observed_agent_runs", 0)) + 1
     if str(agent_type or "").endswith("reviewer"):
         state["observed_reviews"] = int(state.get("observed_reviews", 0)) + 1
+        state["last_reviewer_at"] = time.time()
     return _cap_agents(cfg, state)
 
 
@@ -561,6 +562,7 @@ def record_pass(cfg: Config, before: str | None = None) -> State | None:
     if before is not None and before != now:
         raise ValueError("files changed while the gate ran; run `sdd check` again")
     _gate(state)["passed"] = now
+    _gate(state)["passed_at"] = time.time()
     save(cfg.root, state)
     return state
 
@@ -596,6 +598,9 @@ def _review_witnessed(state: State) -> bool:
     """
     if not int(state.get("observed_agent_runs", 0)):
         return True
+    passed_at = _gate(state).get("passed_at")
+    if passed_at is not None and float(state.get("last_reviewer_at", 0)) < float(passed_at):
+        return False  # the code passed the gate again after the last reviewer finished
     return int(state.get("observed_reviews", 0)) > int(state.get("accepted_reviews", 0))
 
 
@@ -610,7 +615,7 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
     entry = _task(state, task_id)
     if verdict == "clean" and not _review_witnessed(state):
         raise ValueError(
-            "no reviewer subagent has finished since the last clean verdict; "
+            "no reviewer subagent has finished since the last clean verdict and passing gate; "
             "run specsteward:reviewer first (a verdict is not taken on trust)"
         )
     entry["review_rounds"] += 1

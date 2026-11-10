@@ -39,7 +39,11 @@ def _git(root: Path) -> Finding:
     try:
         branch = current_branch(root)  # also works before the first commit
     except ValueError:
-        return Finding(WARN, "not a git repository", "run `git init`; reviews read `git diff`")
+        return Finding(
+            WARN,
+            "not a git repository",
+            "run `git init`; reviews read `git diff` and the scope check compares against git",
+        )
     return Finding(OK, f"git branch {branch}")
 
 

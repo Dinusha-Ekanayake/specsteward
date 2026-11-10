@@ -23,7 +23,7 @@ It does everything it can by itself, and walks you through the rest:
 - switches the plugin **off in ordinary sessions**, so other terminals and VS Code panels no longer start their own copy of the bot and swallow your replies;
 - installs a **`claude-phone`** command (next to `claude`; `claude-phone.cmd` too on Windows) that starts Claude Code with the plugin loaded and its channel on;
 - tells you how to create the bot (Telegram: [@BotFather](https://t.me/BotFather), `/newbot`), asks you to paste the token at a hidden prompt, checks it with the bot API and saves it in your operating system's credential store (see [Where the token is kept](#where-the-token-is-kept));
-- **Telegram:** asks you to send the bot any message, shows who wrote ("Message from @you, account 123. Is this you?"), and on your `y` allows only that account and locks the bot. You confirm on your own keyboard, so a message from someone else can never pair itself. It then sends a test message to your phone;
+- **Telegram:** prints a random one-time code in the terminal and waits for a message to the bot that contains exactly that code; the sender of that message is the only account allowed, and the bot is locked to it. Messages without the code are ignored, so a stranger who guesses the bot name (or copies your display name) cannot pair, and only someone who can read your terminal can. It then sends a test message to your phone;
 - **Discord:** pairing goes through the plugin: in the `claude-phone` session DM the bot, run `/discord:access pair <code>`, then `bash .sdd/bin/sdd phone lock --channel discord`;
 - offers to start `claude-phone` right away.
 

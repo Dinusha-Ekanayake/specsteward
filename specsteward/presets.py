@@ -10,6 +10,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 STACKS = ("python", "node", "go", "rust", "generic")
 PRESETS = ("auto", *STACKS)
@@ -120,8 +121,14 @@ def _node(root: Path) -> Preset:
         package = json.loads(_read(root, "package.json") or "{}")
     except ValueError:
         package = {}
-    scripts: dict[str, str] = package.get("scripts") or {}
-    deps = {**(package.get("dependencies") or {}), **(package.get("devDependencies") or {})}
+    package = package if isinstance(package, dict) else {}
+
+    def table(key: str) -> dict[str, Any]:
+        value = package.get(key)
+        return value if isinstance(value, dict) else {}
+
+    scripts = {k: v for k, v in table("scripts").items() if isinstance(v, str)}
+    deps = {**table("dependencies"), **table("devDependencies")}
     pm, exe = _package_manager(root)
     checks: list[Step] = []
     if "lint" in scripts:
@@ -132,7 +139,10 @@ def _node(root: Path) -> Preset:
     elif (root / "tsconfig.json").exists():
         checks.append(Step("types", (*exe, "tsc", "--noEmit"), "error TS"))
     if "test" in scripts and _NPM_DEFAULT_TEST not in scripts["test"]:
-        checks.append(Step("tests", (pm, "test"), r"(FAIL|Error:|✕|×)"))
+        test_cmd = (
+            (pm, "run", "test") if pm == "bun" else (pm, "test")
+        )  # bun test is its own runner
+        checks.append(Step("tests", test_cmd, r"(FAIL|Error:|✕|×)"))
     fmt: dict[str, tuple[tuple[str, ...], ...]] = {}
     if "prettier" in deps or any(root.glob(".prettierrc*")):
         cmd = ((*exe, "prettier", "--write", "{file}"),)

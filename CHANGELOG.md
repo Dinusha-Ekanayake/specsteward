@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 (2026-11-10)
+
+### Security
+- Phone pairing no longer trusts a display name: the wizard prints a random one-time code and pairs only the account that sends exactly that code. Text from strangers is printed without control or bidirectional characters.
+
+### Fixed
+- Scope: a file that was already modified when the run started is compared by content (with a saved copy), so further changes to it are no longer invisible.
+- Scope: a symbol is only named by the plan's `Modules / files` section, a `path::name` mention or a task row, not by any backticked word.
+- Scope: `sdd check` prints `SCOPE:` lines early, and `sdd scope` shows which files only the allow-list permitted. `sdd doctor` says the scope check needs git.
+- A clean review verdict needs a reviewer that finished after the last passing gate, not just any reviewer run.
+- The setup wizard no longer calls a saved token dead when the network is down, says plainly when the token file is not owner-only (Windows), keeps a backup of an unreadable `access.json` instead of overwriting it, and no longer hands the launcher to WSL's `bash`.
+- `package.json` of an unexpected shape no longer crashes `sdd init`, and Bun projects run their `test` script instead of Bun's own runner.
+
 ## 0.5.0 (2026-11-10)
 
 ### Added

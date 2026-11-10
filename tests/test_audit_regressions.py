@@ -375,3 +375,52 @@ def test_javascript_exports_and_bad_symbol_mode() -> None:
     }
     with pytest.raises(ValueError, match="symbols"):
         from_dict(Path("."), {"scope": {"symbols": "x"}})
+
+
+# --- scope hardening ------------------------------------------------------------------------
+
+
+def test_a_file_dirty_before_the_run_is_still_watched_for_new_changes(repo: Path) -> None:
+    from specsteward import scope
+    from specsteward import state as run_state
+
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "old.py").write_text("def a():\n    return 1\n", encoding="utf-8")
+    plan = repo / "specs" / "009-demo" / "plan.md"
+    plan.write_text("# Plan\n\n| `src/new.py` | one |\n", encoding="utf-8")
+    cfg = config.load(repo)
+    _git_repo(repo)
+    (repo / "src" / "old.py").write_text("def a():\n    return 2\n", encoding="utf-8")  # dirty
+    run_state.approve(cfg, "009", "test")
+    run_state.start(cfg, "009", check_branch=False)
+    run = run_state.require(repo)
+    assert scope.out_of_scope(cfg, run) == []  # the earlier edit is not the run's
+    (repo / "src" / "old.py").write_text("def a():\n    return 3\n", encoding="utf-8")
+    assert scope.out_of_scope(cfg, run) == ["src/old.py"]
+
+
+def test_a_passing_mention_does_not_name_a_symbol() -> None:
+    from specsteward.scope import named_symbols
+
+    plan = (
+        "# Plan\n\n## Modules / files\n| `src/a.py` | `login` |\n\n## Risks\nNever touch `purge`.\n"
+    )
+    tasks = "| T-009-01 | add `refresh` | t | low | [ ] |\n"
+    assert named_symbols(plan, tasks) == {"src", "a", "py", "login", "refresh"}
+
+
+def test_a_clean_verdict_needs_a_reviewer_after_the_last_passing_gate(repo: Path) -> None:
+    from specsteward import state as run_state
+
+    cfg = config.load(repo)
+    run_state.start(cfg, "009", check_branch=False)
+    task = run_state.next_step(cfg)["tasks"][0]
+    state = run_state.require(repo)
+    state["observed_agent_runs"] = 1
+    run_state.save(repo, state)
+    run_state.observe_agent(cfg, "specsteward:reviewer", None)
+    run_state.record_pass(cfg)  # the code passed the gate again after that reviewer
+    with pytest.raises(ValueError, match="reviewer"):
+        run_state.record_review(cfg, task, "clean")
+    run_state.observe_agent(cfg, "specsteward:reviewer", None)
+    run_state.record_review(cfg, task, "clean")

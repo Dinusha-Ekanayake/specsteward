@@ -8,6 +8,7 @@ approves again before the run can go on.
 """
 
 import ast
+import hashlib
 import re
 import subprocess
 from fnmatch import fnmatchcase
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from specsteward.config import Config
+from specsteward.safefs import ensure_safe
 from specsteward.worktree import SKIP_DIRS, SKIP_FILES, TOP_LEVEL_SKIP
 
 DEFAULT_ALLOW = (
@@ -56,10 +58,51 @@ def _changed_now(root: Path, base: str | None) -> set[str]:
     return {path.replace("\\", "/") for path in (*tracked, *untracked)}
 
 
+BASE_DIR = Path(".sdd") / "scope-base"
+MAX_COPIES = 200
+MAX_COPY_BYTES = 1_000_000
+
+
+def _digest(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""  # deleted, or unreadable
+
+
 def snapshot(root: Path) -> dict[str, Any]:
-    """Taken when a run starts: where it began, and what was already dirty."""
+    """Taken when a run starts: where it began, and what was already dirty.
+
+    A file that was already changed is remembered by content, with a copy of small ones, so
+    the run is blamed only for what it does to it, not for the edits that came first.
+    """
     base = head(root)
-    return {"base": base, "dirty": sorted(_changed_now(root, base))}
+    dirty: dict[str, str] = {}
+    for count, rel in enumerate(sorted(_changed_now(root, base))):
+        source = root / rel
+        dirty[rel] = _digest(source)
+        try:
+            if count < MAX_COPIES and source.is_file() and source.stat().st_size <= MAX_COPY_BYTES:
+                copy = root / BASE_DIR / rel
+                ensure_safe(root, copy)
+                copy.parent.mkdir(parents=True, exist_ok=True)
+                copy.write_bytes(source.read_bytes())
+        except (OSError, ValueError):
+            continue  # no copy: the symbol check skips this file
+    return {"base": base, "dirty": dirty}
+
+
+def _touched(root: Path, start: dict[str, Any]) -> list[str]:
+    """Files the run changed: different from the start, not merely different from HEAD."""
+    dirty = start.get("dirty", {})
+    if isinstance(dirty, list):  # state written by an older release: whole files are skipped
+        dirty = dict.fromkeys(dirty, None)
+    found = []
+    for path in sorted(_changed_now(root, start.get("base"))):
+        if path in dirty and (dirty[path] is None or dirty[path] == _digest(root / path)):
+            continue
+        found.append(path)
+    return found
 
 
 def planned_paths(plan: str) -> list[str]:
@@ -103,11 +146,9 @@ def out_of_scope(cfg: Config, state: dict[str, Any]) -> list[str]:
         return []
     allowed += [*DEFAULT_ALLOW, *cfg.scope_allow, f"{spec_dir}/"]
     start = state.get("scope") or {}
-    skip = set(start.get("dirty", []))
-    changed = _changed_now(cfg.root, start.get("base"))
     return sorted(
         path
-        for path in changed - skip
+        for path in _touched(cfg.root, start)
         if not _ignored(path) and not any(_matches(path, pattern) for pattern in allowed)
     )
 
@@ -135,10 +176,28 @@ _JS_DECL = re.compile(
 )
 
 
-def named_symbols(*texts: str) -> set[str]:
-    """Identifiers the plan and tasks mention in backticks (`login`, `Auth.login()`, `a.py::f`)."""
+def _files_section(plan: str) -> str:
+    """The plan's `Modules / files` section; the whole plan when it has no such heading."""
+    lines: list[str] = []
+    inside = found = False
+    for line in plan.splitlines():
+        if line.startswith("#"):
+            inside = any(word in line.lower() for word in ("modules", "files"))
+            found = found or inside
+        elif inside:
+            lines.append(line)
+    return "\n".join(lines) if found else plan
+
+
+def named_symbols(plan: str, tasks: str) -> set[str]:
+    """Identifiers that the plan's file table, a `path::name` mention or a task row backticks.
+
+    A passing mention elsewhere (a risk note, the approach) does not count as naming it.
+    """
+    rows = [line for line in tasks.splitlines() if line.lstrip().startswith("|")]
+    pairs = [line for line in plan.splitlines() if "::" in line]
     names: set[str] = set()
-    for text in texts:
+    for text in (_files_section(plan), *rows, *pairs):
         for token in _BACKTICKED.findall(text):
             names.update(_IDENT.findall(token))
     return names
@@ -178,6 +237,17 @@ def _symbols(path: str, source: str) -> dict[str, str]:
     return {}
 
 
+def _start_text(root: Path, start: dict[str, Any], path: str) -> str | None:
+    """The file as the run found it: the saved copy if it was already dirty, else HEAD."""
+    if path in start.get("dirty", {}):
+        copy = root / BASE_DIR / path
+        try:
+            return copy.read_text(encoding="utf-8", errors="replace") if copy.is_file() else None
+        except OSError:
+            return None
+    return _text_at(root, str(start["base"]), path)
+
+
 def _text_at(root: Path, base: str, path: str) -> str | None:
     try:
         proc = subprocess.run(
@@ -207,16 +277,17 @@ def unplanned_symbols(cfg: Config, state: dict[str, Any]) -> list[str]:
         return []
     plan_text = plan.read_text(encoding="utf-8")
     tasks = spec_dir / "tasks.md"
-    named = named_symbols(plan_text, tasks.read_text(encoding="utf-8") if tasks.exists() else "")
+    tasks_text = tasks.read_text(encoding="utf-8") if tasks.exists() else ""
+    named = named_symbols(plan_text, tasks_text)
     planned = planned_paths(plan_text)
     out: list[str] = []
-    for path in sorted(_changed_now(cfg.root, base) - set(start.get("dirty", []))):
+    for path in _touched(cfg.root, start):
         file = cfg.root / path
         if _ignored(path) or not file.is_file() or any(_matches(path, a) for a in DEFAULT_ALLOW):
             continue
         if not any(_matches(path, pattern) for pattern in planned):
             continue  # outside the plan: the file check reports it
-        before = _text_at(cfg.root, base, path)
+        before = _start_text(cfg.root, start, path)
         if before is None:
             continue
         old = _symbols(path, before)
@@ -239,3 +310,28 @@ def symbol_problem(cfg: Config, state: dict[str, Any]) -> str | None:
         f"{state['spec_dir']}/plan.md or tasks.md in backticks and ask the user to approve again, "
         "or revert them"
     )
+
+
+def allowed_unplanned(cfg: Config, state: dict[str, Any]) -> list[str]:
+    """Changed files that only the allow-list (tests, changelog, [scope] allow) permits."""
+    if cfg.scope_mode == "off":
+        return []
+    plan_file = cfg.root / str(state["spec_dir"]) / "plan.md"
+    planned = planned_paths(plan_file.read_text(encoding="utf-8")) if plan_file.exists() else []
+    spec_dir = f"{state['spec_dir']}/"
+    allow = (*DEFAULT_ALLOW, *cfg.scope_allow)
+    return [
+        path
+        for path in _touched(cfg.root, state.get("scope") or {})
+        if not _ignored(path)
+        and not path.startswith(spec_dir)
+        and not any(_matches(path, pattern) for pattern in planned)
+        and any(_matches(path, pattern) for pattern in allow)
+    ]
+
+
+def notes(cfg: Config, state: dict[str, Any]) -> list[str]:
+    """One line per finding, for `sdd check` and `sdd scope`; empty when all is inside."""
+    lines = [f"outside the plan: {path}" for path in out_of_scope(cfg, state)]
+    lines += [f"unplanned symbol: {name}" for name in unplanned_symbols(cfg, state)]
+    return lines

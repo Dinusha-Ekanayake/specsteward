@@ -127,3 +127,21 @@ def test_a_committed_venv_is_never_used(tmp_path: Path) -> None:
     for args in (["init", "-q"], ["add", "-f", ".venv/bin/python"]):
         subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
     assert project_python(tmp_path) == sys.executable
+
+
+def test_a_package_json_of_the_wrong_shape_does_not_crash(tmp_path: Path) -> None:
+    for body in (
+        "[]",
+        '"x"',
+        '{"scripts": [], "devDependencies": ["a"]}',
+        '{"scripts": {"test": 1}}',
+    ):
+        (tmp_path / "package.json").write_text(body, encoding="utf-8")
+        assert preset_for(tmp_path, "node").stack == "node"
+
+
+def test_bun_runs_the_projects_test_script(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text('{"scripts": {"test": "vitest"}}', encoding="utf-8")
+    (tmp_path / "bun.lockb").write_text("", encoding="utf-8")
+    tests = next(step for step in preset_for(tmp_path, "node").checks if step.name == "tests")
+    assert tests.cmd == ("bun", "run", "test")

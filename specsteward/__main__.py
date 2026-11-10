@@ -377,6 +377,10 @@ def _check(cfg: cfg_mod.Config, task: str | None) -> int:
     before = run_state.run_tree(cfg)  # the gate runs project code; see record_pass
     results = run_all(cfg)
     print(format_report(results))
+    active = run_state.load(cfg.root)
+    if active is not None and active["active"] and cfg.scope_mode != "off":
+        for line in scope_mod.notes(cfg, active):
+            print(f"SCOPE: {line}")
     if all(r.ok for r in results):
         run_state.record_pass(cfg, before)
         return 0
@@ -449,14 +453,20 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         return 0
     if command == "scope":
         run = run_state.require(root)
-        extra = scope_mod.out_of_scope(cfg, run)
-        symbols = scope_mod.unplanned_symbols(cfg, run)
-        lines = [*extra, *(f"unplanned symbol {name}" for name in symbols)]
+        lines = scope_mod.notes(cfg, run)
         print("\n".join(lines) if lines else "all changes are inside the approved plan")
-        failing = (extra and cfg.scope_mode == "enforce") or (
+        extra = scope_mod.allowed_unplanned(cfg, run)
+        if extra:
+            print(
+                "allowed without being planned (tests, changelog, [scope] allow): "
+                + ", ".join(extra)
+            )
+        files = [line for line in lines if line.startswith("outside")]
+        symbols = [line for line in lines if line.startswith("unplanned")]
+        blocked = (files and cfg.scope_mode == "enforce") or (
             symbols and cfg.symbol_mode == "enforce"
         )
-        return 1 if failing else 0
+        return 1 if blocked else 0
     if command == "remote":
         print(json.dumps(remote_status(), indent=2))
         return 0
