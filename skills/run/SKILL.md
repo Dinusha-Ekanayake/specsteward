@@ -71,7 +71,12 @@ run uses a `fix/<NNN>-*` or `feature/<NNN>-*` branch.
       the last clean review both saw the code as it is now. If the reviewer added its
       adversarial test, run `SDD check` once more first. `human` tasks are marked `[?]`
       automatically. Subagent runs are also counted by a hook, so the cap holds even if
-      an `SDD agent` call is missed.
+      an `SDD agent` call is missed. `SDD done` also reports files outside the approved
+      plan (`SDD scope` lists them) and, with `[tdd] red_first`, a group that never had a
+      failing test run: warnings by default, refusals when the project set `enforce`. If
+      the implementer said no test applies, tick with `SDD done <id> --waive-red "<why>"`;
+      for a file the work really needs, ask the user to add it to `plan.md` and approve
+      again, never to edit around the guard.
    8. `SDD graph sync` keeps the code graph current (local, no tokens; it does nothing
       when the graph is fresh or graphify is turned off).
    9. Print one line, for example `T-003-04..05 done (review clean, 1 assumption)`. If the
