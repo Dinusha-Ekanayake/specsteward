@@ -11,7 +11,7 @@ from specsteward import config as cfg_mod
 from specsteward import graph, phone, prereqs, secret_store, trust, wizard
 from specsteward.check import resolve_cmd
 from specsteward.hooks import SHIM
-from specsteward.init import ASK, DENY, legacy_hook_commands
+from specsteward.init import ASK, DENY, POWERSHELL_ASK, legacy_hook_commands
 from specsteward.remote import CHANNELS, channel_status, configured, running_servers, state_dir
 from specsteward.state import current_branch
 
@@ -108,6 +108,16 @@ def _permissions(root: Path) -> list[Finding]:
     missing = [rule for rule in ASK if rule not in rules["ask"]]
     gates = [rule for rule in missing if ".sdd/bin/sdd" in rule]
     git = [rule for rule in missing if rule not in gates]
+    ps_missing = [rule for rule in POWERSHELL_ASK[:5] if rule not in rules["ask"]]
+    if ps_missing:
+        level = FAIL if sys.platform == "win32" else WARN
+        found.append(
+            Finding(
+                level,
+                f"the PowerShell tool is not covered by the sdd gates: {ps_missing}",
+                "run `sdd init` again",
+            )
+        )
     if gates:
         found.append(Finding(FAIL, f"sdd gates do not prompt: {gates}", "run `sdd init` again"))
     else:

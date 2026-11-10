@@ -32,6 +32,8 @@ class BotError(Exception):
 
 
 def _fetch(url: str, body: dict[str, Any] | None, headers: dict[str, str]) -> tuple[int, Any]:
+    if not url.startswith("https://"):
+        raise ValueError("refusing a non-https bot API url")
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(url, data=data, headers=headers)
     if data is not None:

@@ -35,6 +35,11 @@ ASK = [
     "Bash(gh pr merge:*)",
 ]
 
+# Claude Code on Windows runs shell commands with the PowerShell tool, which the Bash rules
+# above do not cover, so the same gates are repeated for it.
+POWERSHELL_ASK = [rule.replace("Bash(", "PowerShell(", 1) for rule in ASK]
+POWERSHELL_ALLOW = [rule.replace("Bash(", "PowerShell(", 1) for rule in ALLOW[:1]]
+
 # Defence in depth next to the PreToolUse guard hook: file tools never edit run state
 # or the trust store. "Edit" rules cover every built-in file-editing tool.
 DENY = [
@@ -68,7 +73,11 @@ def _merge_settings(path: Path) -> list[str]:
     # user's to relax, and removing one must not be undone by the next `init`.
     rerun = ALLOW[0] in permissions.get("allow", [])
     added = []
-    for key, rules in (("allow", ALLOW), ("ask", ASK), ("deny", DENY)):
+    for key, rules in (
+        ("allow", [*ALLOW, *POWERSHELL_ALLOW]),
+        ("ask", [*ASK, *POWERSHELL_ASK]),
+        ("deny", DENY),
+    ):
         existing = permissions.setdefault(key, [])
         for rule in rules:
             if rerun and key != "deny" and ".sdd/bin/sdd" not in rule:

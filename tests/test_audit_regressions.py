@@ -424,3 +424,74 @@ def test_a_clean_verdict_needs_a_reviewer_after_the_last_passing_gate(repo: Path
         run_state.record_review(cfg, task, "clean")
     run_state.observe_agent(cfg, "specsteward:reviewer", None)
     run_state.record_review(cfg, task, "clean")
+
+
+# --- the PowerShell tool (Windows) -----------------------------------------------------------
+
+
+def _ps_ask(command: str) -> bool:
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": command}}
+    return shell_guard_decision(payload) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bash .sdd/bin/sdd trust",
+        r"& bash.exe .sdd\bin\sdd approve 001",
+        r".\.sdd\bin\sdd.cmd approve 001",
+        'powershell -Command "bash .sdd/bin/sdd trust"',
+        "pwsh -c bash .sdd/bin/sdd start 001",
+        'cmd /c "bash .sdd/bin/sdd signoff T-001-01"',
+        "iex 'bash .sdd/bin/sdd resume'",
+        "Invoke-Expression 'bash .sdd/bin/sdd trust'",
+        "powershell -EncodedCommand YgBhAHMAaAA=",
+        r"Set-Content .sdd\state.json '{}'",
+        "Remove-Item -Recurse .sdd",
+        r"'{}' | Out-File .claude\settings.json",
+        "echo hi; Set-Content ~/.claude/specsteward/trust.json x",
+    ],
+)
+def test_powershell_commands_that_touch_the_gates_ask(command: str) -> None:
+    assert _ps_ask(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["Get-ChildItem", "git status", "bash .sdd/bin/sdd status", "Get-Content a.py", "pytest -q"],
+)
+def test_ordinary_powershell_commands_do_not_ask(command: str) -> None:
+    assert not _ps_ask(command)
+
+
+def test_other_tools_are_still_ignored_by_the_shell_guard() -> None:
+    payload = {"tool_name": "Read", "tool_input": {"command": "bash .sdd/bin/sdd trust"}}
+    assert shell_guard_decision(payload) is None
+
+
+def test_init_adds_powershell_gates_and_doctor_reports_them_when_missing(tmp_path: Path) -> None:
+    import json
+    import sys
+
+    from specsteward.doctor import run_doctor
+    from specsteward.init import POWERSHELL_ASK, init_project
+
+    init_project(tmp_path, "generic")
+    settings = tmp_path / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert set(POWERSHELL_ASK) <= set(data["permissions"]["ask"])
+    assert "PowerShell(bash .sdd/bin/sdd:*)" in data["permissions"]["allow"]
+    data["permissions"]["ask"] = [r for r in data["permissions"]["ask"] if "PowerShell" not in r]
+    settings.write_text(json.dumps(data), encoding="utf-8")
+    found = [f for f in run_doctor(tmp_path) if "PowerShell tool" in f.what]
+    assert len(found) == 1
+    assert found[0].level == ("FAIL" if sys.platform == "win32" else "WARN")
+
+
+def test_hooks_json_matches_the_powershell_tool_too() -> None:
+    import json
+
+    hooks = json.loads((Path(__file__).parent.parent / "hooks" / "hooks.json").read_text("utf-8"))
+    for event in ("PreToolUse", "PostToolUse"):
+        matchers = [group.get("matcher", "") for group in hooks["hooks"][event]]
+        assert "Bash|PowerShell" in matchers

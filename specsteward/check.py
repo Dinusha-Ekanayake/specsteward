@@ -166,7 +166,7 @@ def signature(results: list[StepResult]) -> str:
             line = re.sub(r":\d+(?::\d+)?", ":", line)
             line = re.sub(r"\b\d+(?:\.\d+)?m?s\b", "", line)
             parts.append(f"{result.name}|{line}")
-    return hashlib.sha1("\n".join(parts).encode()).hexdigest()[:12] if parts else ""
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12] if parts else ""
 
 
 def format_report(results: list[StepResult]) -> str:

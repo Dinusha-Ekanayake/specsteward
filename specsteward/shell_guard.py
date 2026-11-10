@@ -46,6 +46,32 @@ WRITERS = frozenset(
         "powershell.exe",
         "cmd",
         "cmd.exe",
+        # PowerShell cmdlets and the aliases people actually type
+        "set-content",
+        "add-content",
+        "clear-content",
+        "out-file",
+        "remove-item",
+        "move-item",
+        "copy-item",
+        "rename-item",
+        "new-item",
+        "set-itemproperty",
+        "sc",
+        "ac",
+        "del",
+        "erase",
+        "ri",
+        "mi",
+        "ni",
+        "cpi",
+        "rni",
+        "move",
+        "copy",
+        "ren",
+        "rename",
+        "xcopy",
+        "robocopy",
     ]
 )
 ENV_DUMPS = frozenset(("env", "printenv", "set", "declare", "compgen"))
@@ -73,8 +99,15 @@ def _words(segment: str) -> list[str]:
     return words
 
 
+_EXTENSIONS = (".exe", ".cmd", ".bat", ".ps1", ".com")
+
+
 def _name(word: str) -> str:
-    return re.split(r"[/\\]", word)[-1].lower()
+    name = re.split(r"[/\\]", word)[-1].lower()
+    for extension in _EXTENSIONS:
+        if name.endswith(extension):
+            return name[: -len(extension)]
+    return name
 
 
 def _gated_sdd(words: list[str]) -> str:
@@ -93,22 +126,37 @@ def _gated_sdd(words: list[str]) -> str:
     return ""
 
 
-SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell"})
+SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell", "cmd"})
+EVALS = frozenset({"eval", "iex", "invoke-expression"})
+ENCODED = ("-e", "-ec", "-enc", "-encodedcommand")
+INLINE = ("-c", "-command", "/c", "/k", "-commandwithargs")
+OPAQUE = "an encoded command cannot be inspected"
 
 
 def _nested(words: list[str]) -> str:
-    """The command string a nested shell (`bash -c "..."`) or `eval` runs, else ""."""
+    """The command a nested shell (`bash -c "..."`, `powershell -Command ...`, `cmd /c ...`)
+    or `eval` / `Invoke-Expression` runs, else "". An encoded command comes back as OPAQUE."""
     name = _name(words[0])
-    if name == "eval":
+    if name in EVALS:
         return " ".join(words[1:])
-    if name in SHELLS and "-c" in words[:-1]:
-        return words[words.index("-c") + 1]
+    if name not in SHELLS:
+        return ""
+    lowered = [word.lower() for word in words]
+    if name in ("pwsh", "powershell") and any(flag in lowered[1:] for flag in ENCODED):
+        return OPAQUE
+    for index, word in enumerate(lowered[1:], start=1):
+        if word in INLINE and index + 1 < len(words):
+            # bash takes one string; PowerShell and cmd take everything that follows
+            rest = words[index + 1 :]
+            return rest[0] if name in ("bash", "sh", "zsh", "dash", "ksh") else " ".join(rest)
     return ""
 
 
 def _reason(command: str) -> str:
     whole = _words(command.strip())
     inner = _nested(whole) if whole else ""
+    if inner == OPAQUE:
+        return OPAQUE
     if inner and inner != command and (found := _reason(inner)):
         return found  # `bash -c '...; sdd approve'`: look inside before splitting on `;`
     for segment in SEGMENT.split(command):
@@ -116,6 +164,8 @@ def _reason(command: str) -> str:
         if not words:
             continue
         inner = _nested(words)
+        if inner == OPAQUE:
+            return OPAQUE
         if inner and inner != command and (found := _reason(inner)):
             return found
         gated = _gated_sdd(words)
@@ -136,9 +186,13 @@ def _reason(command: str) -> str:
 
 
 def shell_guard_decision(payload: dict[str, Any]) -> dict[str, Any] | None:
-    if payload.get("tool_name") not in (None, "Bash"):
+    if payload.get("tool_name") not in (None, "Bash", "PowerShell"):
         return None
     command = str((payload.get("tool_input") or {}).get("command") or "")
+    if payload.get("tool_name") == "PowerShell":
+        command = command.replace(
+            chr(92), "/"
+        )  # a backslash is a path separator there, not an escape
     reason = _reason(command) if command else ""
     if not reason:
         return None
