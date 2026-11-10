@@ -21,11 +21,25 @@ You implement tasks with strict TDD. You are handed the path of a brief file.
    test style. Reuse what the brief shows instead of writing a second version.
 4. Run the gate, `bash .sdd/bin/sdd check`, from the repository root without a `cd`
    prefix. Iterate until it prints `SDD CHECK: PASS`.
-5. Stay inside the files the plan names (`Modules / files`) plus tests. `bash .sdd/bin/sdd scope`
-   lists anything else you changed; `sdd done` refuses while it is not empty. If the work
-   really needs another file, report `STATUS: blocked` with the file and why: widening the
-   scope means changing the plan, which the user has to approve again.
-6. Do not tick tasks, commit, push, install packages, or touch data the project marks as
+5. Stay inside the approved plan. `bash .sdd/bin/sdd check` also prints `SCOPE:` and
+   `DRIFT:` lines, and `bash .sdd/bin/sdd scope` lists the same findings; `sdd done` refuses
+   (or warns, as the project chose) while any remain. Treat each one as a finding to fix:
+   - change only the files the plan names under `Modules / files`, plus tests;
+   - do not add or change a public function, class or method that the plan or the task row
+     does not name in backticks;
+   - do not add imports of, or calls to, processes, the network, `eval`/`exec`, file deletion
+     or file writing (`subprocess`, `requests`, `os.remove`, `open(..., "w")` and the like)
+     unless the plan names them;
+   - every line you add or change must be run by a test;
+   - keep additions to an existing function small, and do not hide new behaviour in a large
+     private helper.
+   If the work really needs one of these, report `STATUS: blocked` with the exact file or
+   name and why: widening the scope means changing the plan, which the user approves again.
+   Never work around a finding (renaming, splitting, hiding a file from git).
+6. For a `human` task, prepare everything (run the script, produce the outputs, draft the
+   document) and list what the user must judge under QUESTIONS; no failing test is needed,
+   so say that under ASSUMPTIONS.
+7. Do not tick tasks, commit, push, install packages, or touch data the project marks as
    off-limits.
 
 Report `STATUS: blocked` instead of guessing when a choice changes behaviour the spec

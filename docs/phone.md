@@ -27,7 +27,7 @@ It does everything it can by itself, and walks you through the rest:
 - **Discord:** pairing goes through the plugin: in the `claude-phone` session DM the bot, run `/discord:access pair <code>`, then `bash .sdd/bin/sdd phone lock --channel discord`;
 - offers to start `claude-phone` right away.
 
-So for Telegram you do four things: create the bot, paste the token, send one message, press `y`. Run it again at any time: it keeps a working token and lock, and only asks again for what is missing.
+So for Telegram you do four things: create the bot, paste the token, send the bot the one-time code the terminal shows. Run it again at any time: it keeps a working token and lock, and only asks again for what is missing.
 
 `/specsteward:remote` in Claude Code runs the automatic part and tells you to open a terminal for the rest (Claude Code's own shell cannot take a hidden token). `--no-input` does the same from a script. The by-hand route still works: in a `claude-phone` session run `/<ch>:configure <token>`, DM the bot, `/<ch>:access pair <code>`, then `bash .sdd/bin/sdd phone lock`. Note that `/<ch>:configure` stores the token as plain text; run `sdd phone setup` afterwards to move it into the credential store.
 

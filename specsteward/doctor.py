@@ -130,7 +130,7 @@ def _permissions(root: Path) -> list[Finding]:
     if gates:
         found.append(Finding(FAIL, f"sdd gates do not prompt: {gates}", "run `sdd init` again"))
     else:
-        found.append(Finding(OK, "approve, trust, start and resume prompt you"))
+        found.append(Finding(OK, "approve, trust, start, resume and signoff prompt you"))
     if git:
         found.append(Finding(WARN, f"these run without asking: {git}", "fine if you chose it"))
     missing_deny = [rule for rule in DENY if rule not in rules["deny"]]

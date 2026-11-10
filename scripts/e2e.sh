@@ -81,7 +81,7 @@ step "hook runner: the guards answer through scripts/hooks/run.cmd (the way Clau
 export CLAUDE_PLUGIN_ROOT="$PLUGIN"
 HOOK_RUN="$PLUGIN/scripts/hooks/run.cmd"
 case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) echo "(Windows: covered by the hooks test in the manifests job)" ;;
+  MINGW*|MSYS*|CYGWIN*) echo "(Windows: the runner is covered by tests/test_plugin_layout.py in the test job)" ;;
   *)
     out="$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"bash .sdd/bin/sdd approve 001"}}' | "$HOOK_RUN" shell-guard)"
     echo "$out" | grep -q '"ask"' || { echo "UNEXPECTED: shell guard did not ask: $out"; exit 1; }

@@ -4,6 +4,7 @@
 
 - `sdd review <task> clean` is only partly a gate: once the plugin's hooks have been seen working in the run (the bind hook marks it when `sdd start` runs, or a subagent was observed), each clean verdict needs a `specsteward:reviewer` run that finished since the last one. Where the hook does not fire (older Claude Code) it stays honour-based, and the main agent could still record a verdict after a reviewer it ignored. Approval, trust, start, resume and sign-off are the tamper-proof gates.
 - Trust and approvals are keyed by the git repository, so two sdd projects in one repository share them.
+- specsteward asks git what changed, so git itself is guarded: its calls switch `core.fsmonitor` off, files marked `--assume-unchanged` or `--skip-worktree` are compared by content, a change to `.git/info/exclude` or `core.excludesFile` during a run blocks `sdd done`, and `.git/config`, `.git/hooks` and `.git/info` are closed to file tools. A hook the user already has in `.git/hooks` still runs when the user's own git commands run it.
 
 ## What specsteward can do
 

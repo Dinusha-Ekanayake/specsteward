@@ -14,8 +14,14 @@ You draft specs. Read `sdd.toml` for `specs_dir`, then use `<specs_dir>/_templat
 2. Create `<specs_dir>/<NNN>-<slug>/` with the next free number, and write:
    - `spec.md`: problem, scope and non-goals, requirements (`REQ-<NNN>-xx`), acceptance
      criteria, risks and open questions. **Keep the status Draft.** Only the user approves.
-   - `plan.md`: approach, a table of files and their responsibilities (backticked paths
-     and names, which the brief generator uses), data flow, test strategy, risks.
+   - `plan.md`: approach, the `Modules / files` table, data flow, test strategy, risks.
+     That table is the run's allow-list, so be complete; anything it does not name is
+     refused or flagged when a task is ticked. In backticks, list:
+     - every file a task creates or changes, docs and config included (tests and
+       `CHANGELOG` are always allowed);
+     - every public function, class or method to be added or changed (`` `Auth.login` ``);
+     - any module the code may use to start processes, reach the network, evaluate code,
+       or delete or write files (`` `subprocess` ``, `` `requests` ``), or `none`.
    - `tasks.md`: small tasks (about one module or one guarantee each), each with a
      concrete test and a Risk:
      - `high`: correctness-critical (data leakage, security, money, migrations, metrics,

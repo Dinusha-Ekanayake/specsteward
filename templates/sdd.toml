@@ -39,11 +39,11 @@ human = "opus"
 # report = "coverage.xml"   # Cobertura XML or lcov
 # mode = "warn"             # enforce | warn | off
 
-# Per-task reviews. skip = ["low"] saves a reviewer run per low-risk group; the final
-# Opus review of the branch still covers those tasks. High and human risk always get one.
 [tdd]
 # red_first = "warn"   # warn | enforce | off: a failing test run must come before the passing one
 
+# Per-task reviews. skip = ["low"] saves a reviewer run per low-risk group; the final
+# Opus review of the branch still covers those tasks. High and human risk always get one.
 [review]
 skip = []
 
@@ -52,6 +52,7 @@ max_review_rounds = 2
 max_fix_attempts = 3
 max_agent_runs = 60
 restart_after_tasks = 4
+max_converge_rounds = 2   # converge passes that may add tasks before shipping
 max_tokens = 0          # halt after this many fresh tokens (input, cache writes, output); 0 = off
 
 [groups]

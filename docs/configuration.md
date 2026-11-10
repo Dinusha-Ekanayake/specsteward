@@ -1,6 +1,6 @@
 # Configuration (`sdd.toml`)
 
-`sdd init` writes this file at the repository root. It detects the stack (Python, Node, Go, Rust, or a Makefile) and builds the gate from what the project already uses, so it normally works without editing. Run `sdd doctor` to check it. Every section is optional; the defaults are shown.
+`sdd init` writes this file at the repository root. It detects the stack (Python, Node, Go, Rust, or a Makefile) and builds the gate from what the project already uses, so it normally works without editing. Run `sdd doctor` to check it. Every section is optional. The blocks show the defaults, except where a value is marked as an example.
 
 Any change to `sdd.toml` makes it **untrusted** until you run `sdd trust` (a permission prompt). Until then `sdd check` and the format hook run nothing. See [security.md](security.md).
 
@@ -85,22 +85,22 @@ symbols = "warn"        # enforce | warn | off: public symbols the plan does not
 surface = "warn"        # enforce | warn | off: new imports and calls that reach out
 growth = "warn"         # enforce | warn | off: a function that grew past max_growth
 max_growth = 80         # syntax-tree nodes a function may gain in one run (0 = off)
-allow = ["docs/**"]     # extra globs a run may always touch
+allow = ["docs/**"]     # example; default []: extra globs a run may always touch
 ```
 
 The approval hash proves the spec, plan and task table did not change. It cannot see code wandering outside them, so `sdd done` also compares the files changed since the run started with the files the approved plan names in backticks (the `Modules / files` table). Tests, `CHANGELOG*` and the spec folder are always allowed (`sdd scope` lists what only the allow-list let through, so it stays visible). Files that were already changed when the run started are compared by content, so the run is blamed only for what it does to them. A symbol counts as named only in the plan's `Modules / files` section, a `path::name` mention, or a task row. In `enforce` mode a task is not ticked while anything else has changed; `sdd scope` lists the files. To widen the scope, add the file to `plan.md`: that changes the approved plan, so the spec has to be approved again before the run goes on. `warn` only lists them; a plan that names no files is not checked.
 
-`symbols` goes one level deeper, inside files the plan does name: a public function, class or method that a run adds or changes in a file that existed before the run must be mentioned in backticks in `plan.md` or `tasks.md` (`` `login()` ``, `` `Auth.login` ``). Private names (leading underscore), new files and tests are not checked. Python is compared by syntax tree (a moved or reformatted function is not a change); JavaScript and TypeScript only see new `export`s. The default is `warn`, which prints the names on `sdd done`; `enforce` makes `sdd done` refuse until they are named, which changes the plan and so needs approval again.
+`symbols` goes one level deeper, inside files the plan does name: a public function, class or method that a run adds or changes in a file that existed before the run must be named in backticks in the plan's `Modules / files` section, on a `path::name` line, or in a task row (`` `login()` ``, `` `Auth.login` ``). Private names (leading underscore), new files and tests are not checked. Python is compared by syntax tree (a moved or reformatted function is not a change); JavaScript and TypeScript only see new `export`s. The default is `warn`, which prints the names on `sdd done`; `enforce` makes `sdd done` refuse until they are named, which changes the plan and so needs approval again.
 
 `surface`, `growth` and `[coverage]` look at what a run does *inside* a function the plan already names. None of them proves the code correct; they make silent drift visible, or refuse it.
 
-- `surface`: a changed source file may not gain an import of, or a call to, a process, the network, `eval`/`exec`, a file deletion or a write-mode `open`, unless `plan.md` or `tasks.md` names it in backticks (`` `subprocess` ``). Python is read by syntax tree; JavaScript and TypeScript by `require`/`import` of `child_process`, `fs`, `net`, `http`, `https` and the like, plus `eval` and `new Function`.
-- `growth`: a function or method that gained more than `max_growth` syntax-tree nodes (about eight simple statements for 80) is listed. Python only.
-- `[coverage]`: every line a run adds or changes must be run by a test.
+- `surface`: a changed source file may not gain an import of, or a call to, a process, the network, `eval`/`exec`, a file deletion or a write-mode `open`, unless the plan's `Modules / files` section, a `path::name` line or a task row names it in backticks (`` `subprocess` ``). Naming a watched package covers its calls (`subprocess` covers `subprocess.run`); naming `os` does not cover `os.system`. Imports are followed through aliases, and uses are counted, so one more call in a file that already had one is still new. Files named like tests but kept outside a test folder are read too. This is a list of known names, not a proof: it makes reaching out visible, and code can still do it in ways the list does not know. Python is read by syntax tree; JavaScript and TypeScript by `require`/`import` of `child_process`, `fs`, `net`, `http`, `https` and the like, plus `eval` and `new Function`.
+- `growth`: a function or method that gained more than `max_growth` syntax-tree nodes (about eight simple statements for 80) is listed, and so is a new function the plan does not name that is larger than three budgets (a private helper is where unplanned behaviour would otherwise hide). Python only.
+- `[coverage]`: every line a run adds or changes must be run by a test. The report comes from your own test run, so this trusts the tests: it catches code no test reaches, not a test suite written to lie.
 
 ```toml
 [coverage]
-report = "coverage.xml"   # Cobertura XML or lcov file your test step writes; "" turns it off
+report = "coverage.xml"   # example; default "" (off): Cobertura XML or lcov file your test step writes
 mode = "warn"             # enforce | warn | off
 ```
 

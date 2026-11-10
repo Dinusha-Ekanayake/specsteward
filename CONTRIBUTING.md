@@ -2,7 +2,7 @@
 
 ```bash
 python -m venv .venv
-.venv/bin/pip install pytest pytest-cov ruff mypy      # Windows: .venv/Scripts/pip
+.venv/bin/pip install -r requirements-dev.txt         # Windows: .venv/Scripts/pip
 bash scripts/sdd.sh init                                       # the repo uses itself
 bash .sdd/bin/sdd trust                                 # once, after reviewing sdd.toml
 bash .sdd/bin/sdd check                                 # lint, format, types, tests (85% coverage floor)

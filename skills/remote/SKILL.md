@@ -21,7 +21,7 @@ sessions and turns it on only in sessions started with `claude-phone`.
 3. Tell the user to finish in a terminal of their own (not this session: the token is typed
    at a hidden prompt), in this project: `bash .sdd/bin/sdd phone setup --channel <ch>`.
    It shows how to create the bot, takes and checks the token, and for Telegram pairs and
-   locks the bot when they confirm their own first message on the keyboard, sends a test
+   locks the bot when they send it the one-time code the terminal shows, sends a test
    message and offers to start `claude-phone`. Discord pairing still ends with
    `/discord:access pair <code>` in a `claude-phone` session and
    `bash .sdd/bin/sdd phone lock --channel discord`. Never ask for the token in chat, and

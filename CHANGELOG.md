@@ -4,6 +4,19 @@
 
 ### Fixed
 - **Windows: every hook failed when `System32` came before Git on `PATH`.** Hooks started `bash` by name, which Windows resolves to the WSL launcher (`C:\Windows\System32\bash.exe`) and which fails with `WSL ... execvpe(/bin/bash) failed` when no distribution is installed. On such machines the guards, the formatter and the run loop never ran, and Claude Code showed the error after every turn. Hooks now go through `scripts/hooks/run.cmd`, a file that works as a Windows batch file and as a POSIX script; it finds Git Bash itself and never uses the WSL stub, and the hook scripts run with the shell that is already running them (`"$BASH"`).
+- Scope: a file that was already modified when the run started is compared by content (with a saved copy), so further changes to it are no longer invisible.
+- Scope: a symbol is only named by the plan's `Modules / files` section, a `path::name` mention or a task row, not by any backticked word.
+- Scope: `sdd check` prints `SCOPE:` lines early, and `sdd scope` shows which files only the allow-list permitted. `sdd doctor` says the scope check needs git.
+- A clean review verdict needs a reviewer that finished after the last passing gate, not just any reviewer run.
+- The setup wizard no longer calls a saved token dead when the network is down, says plainly when the token file is not owner-only (Windows), keeps a backup of an unreadable `access.json` instead of overwriting it, and no longer hands the launcher to WSL's `bash`.
+- `package.json` of an unexpected shape no longer crashes `sdd init`, and Bun projects run their `test` script instead of Bun's own runner.
+- A halted run now refuses review verdicts, agent runs and ticks until you resume it; before, `sdd done` still ticked a task after a cap had halted the run.
+- `sdd approve <NNN> --start` on the wrong branch stops before approving anything, instead of approving and then failing to start.
+- Mistakes in `sdd.toml` (an unknown key in `[limits]`, `[scope]`, `[coverage]`, `[tdd]` or `[review]`, which used to leave a guard silently on its default, text where a number belongs, a section that is not a table, a `branch_prefix` with an unknown placeholder) give one clear line instead of a Python traceback.
+- A project in a subfolder of its git repository: scope and drift checks missed every change to a tracked file and reported it as outside the plan.
+- A moved file is compared with the file it was, and a file with a byte-order mark is read correctly, instead of being treated as new or skipped.
+- `[scope] mode = "warn"` now lists out-of-plan files at `sdd done`; `sdd analyze` reports a plan that names no files (the scope guard had nothing to check and said nothing).
+- Every subcommand has a description and help for its arguments (`sdd <command> --help`).
 
 ### Added
 - Drift guard for what a run does inside a function the plan already names (`specsteward/drift.py`). It narrows the gap the scope guard could not see; it does not prove the code correct.
@@ -19,6 +32,8 @@
 
 ### Security
 - Found by an independent audit and fixed:
+  - Git cannot be used to hide a change or to run a program inside specsteward: every git call switches `core.fsmonitor` off and drops the phone bot token; files marked `--assume-unchanged` or `--skip-worktree` are compared by content; a change to `.git/info/exclude` or `core.excludesFile` during a run blocks `sdd done`; file tools may not write `.git/config`, `.git/hooks` or `.git/info`, and the shell guard asks before `git update-index --assume-unchanged` and before `git config` writes of settings that run programs.
+  - The coverage report must be the file the last passing gate left behind, and a report that lists a file but none of its changed lines no longer passes. Side effects are followed through import aliases and counted; files named like tests outside a test folder are read; large new unnamed functions and nested classes count toward the growth budget.
   - The shell guard now looks through quoting, escapes, letter case, wildcards, `cd` into protected folders, `env`/`sudo`/`nohup` prefixes, `bash -lc`, here-documents and shells fed from a pipe, and asks for inline interpreter code that names run state or the environment. It also guards the Windows PowerShell tool (the hooks and the `ask` rules covered only Bash there).
   - Guard hooks keep guarding when `sdd.toml` is unparsable instead of going quiet.
   - `sdd.toml` is bound to the run, so swapping back an older trusted version halts the run until you trust it again.
@@ -30,14 +45,6 @@
   - `phone`, `install`, `worktree` and `init` ask first; clean review verdicts need a witnessed reviewer once the hooks are known to be live.
   - CI: tool versions pinned in `requirements-dev.txt`, a `bandit` step, `CODEOWNERS`, Dependabot for pip.
 - Phone pairing no longer trusts a display name: the wizard prints a random one-time code and pairs only the account that sends exactly that code. Text from strangers is printed without control or bidirectional characters.
-
-### Fixed
-- Scope: a file that was already modified when the run started is compared by content (with a saved copy), so further changes to it are no longer invisible.
-- Scope: a symbol is only named by the plan's `Modules / files` section, a `path::name` mention or a task row, not by any backticked word.
-- Scope: `sdd check` prints `SCOPE:` lines early, and `sdd scope` shows which files only the allow-list permitted. `sdd doctor` says the scope check needs git.
-- A clean review verdict needs a reviewer that finished after the last passing gate, not just any reviewer run.
-- The setup wizard no longer calls a saved token dead when the network is down, says plainly when the token file is not owner-only (Windows), keeps a backup of an unreadable `access.json` instead of overwriting it, and no longer hands the launcher to WSL's `bash`.
-- `package.json` of an unexpected shape no longer crashes `sdd init`, and Bun projects run their `test` script instead of Bun's own runner.
 
 ## 0.5.0 (2026-11-10)
 

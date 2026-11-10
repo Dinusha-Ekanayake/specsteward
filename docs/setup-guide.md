@@ -46,6 +46,8 @@ It:
 
 **Restart Claude Code** so the new permission rules load.
 
+If init says `NOT trusted`, the gate runs your project's own scripts (Node and Makefile projects). Read `sdd.toml`, then run `bash .sdd/bin/sdd trust` yourself; until then `doctor` and `check` refuse.
+
 ## 4. Review three files
 
 1. **`sdd.toml`**: the `[[check]]` commands are your quality gate. Every task must pass them. Make sure they run your real lint, type checks and tests. If you change the file, run `bash .sdd/bin/sdd trust` afterwards (it asks you first).
@@ -91,7 +93,7 @@ bash .sdd/bin/sdd approve 001 --start
 
 `analyze` lists problems (unanswered questions, requirements without tasks, vague wording). `approve` refuses while critical ones remain. The approval is a permission prompt only you can answer, and it covers the spec, plan and task table exactly as they are.
 
-Switch to the spec's branch if `approve --start` asks you to (`feature/001-...` or `fix/001-...`), then:
+A run starts only on the spec's branch (`feature/001-...` or `fix/001-...`). On any other branch `approve --start` stops before approving anything and tells you to switch; do that first (`git checkout -b feature/001-<name>`), then:
 
 ```text
 /specsteward:run 001
@@ -112,7 +114,7 @@ Follow the run with `bash .sdd/bin/sdd status`, the status line (`bash .sdd/bin/
 /specsteward:remote
 ```
 
-It installs everything in one step (Bun, the official Telegram or Discord plugin, and a `claude-phone` command) and switches the plugin off in ordinary sessions, so other terminals and VS Code panels cannot swallow your replies. For the rest, run `bash .sdd/bin/sdd phone setup` in a terminal: create the bot, paste the token, send it one message and press `y`; it locks the bot to you and can start `claude-phone`. Details: [phone.md](phone.md).
+It installs everything in one step (Bun, the official Telegram or Discord plugin, and a `claude-phone` command) and switches the plugin off in ordinary sessions, so other terminals and VS Code panels cannot swallow your replies. For the rest, run `bash .sdd/bin/sdd phone setup` in a terminal: create the bot, paste the token, and send the bot the one-time code the terminal shows; it locks the bot to you and can start `claude-phone`. Details: [phone.md](phone.md).
 
 ## 8. Optional: run specs in parallel
 

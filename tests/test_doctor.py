@@ -41,7 +41,7 @@ def test_fresh_init_is_healthy_once_it_has_a_check(tmp_path: Path) -> None:
     _with_a_check(tmp_path)
     levels = _levels(run_doctor(tmp_path))
     assert FAIL not in levels.values()
-    assert levels["approve, trust, start and resume prompt you"] == OK
+    assert levels["approve, trust, start, resume and signoff prompt you"] == OK
 
 
 def test_a_brand_new_repository_is_recognised(tmp_path: Path) -> None:

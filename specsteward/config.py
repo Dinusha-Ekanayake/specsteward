@@ -265,10 +265,23 @@ TABLES: tuple[str, ...] = (
 TABLES += ("coverage", "format", "models", "review")
 
 
+# Sections where a misspelt key would quietly leave a guard on its default.
+GUARD_KEYS = {
+    "scope": ("mode", "symbols", "surface", "growth", "max_growth", "allow"),
+    "coverage": ("report", "mode"),
+    "tdd": ("red_first",),
+    "review": ("skip",),
+}
+
+
 def from_dict(root: Path, raw: dict[str, Any]) -> Config:
     for name in TABLES:
         if not isinstance(raw.get(name, {}), dict):
             raise ValueError(f"[{name}] must be a table, for example `[{name}]` on its own line")
+    for name, keys in GUARD_KEYS.items():
+        unknown = sorted(set(raw.get(name, {})) - set(keys))
+        if unknown:
+            raise ValueError(f"[{name}] has no key {unknown[0]!r}; the keys are {', '.join(keys)}")
     project = raw.get("project", {})
     limits = _limits(raw.get("limits", {}))
     for key in ("branch_prefix", "fix_branch_prefix"):
