@@ -28,6 +28,7 @@ human = "opus"
 
 [scope]
 # mode = "enforce"   # enforce | warn | off: changes outside the plan's files block `sdd done`
+# symbols = "warn"  # enforce | warn | off: public symbols the plan does not name
 # allow = []         # extra globs a run may always touch
 
 # Per-task reviews. skip = ["low"] saves a reviewer run per low-risk group; the final

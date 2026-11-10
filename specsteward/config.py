@@ -100,6 +100,7 @@ class Config:
     graphify_auto: bool = True  # keep a code graph built and fresh, in the background
     graphify_version: str = GRAPHIFY_VERSION
     scope_mode: str = "enforce"  # enforce | warn | off: changes outside the plan's files
+    symbol_mode: str = "warn"  # enforce | warn | off: public symbols the plan does not name
     scope_allow: tuple[str, ...] = ()  # extra globs a run may always touch
 
     def spec_dir(self, spec: str) -> Path:
@@ -187,8 +188,10 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
     graph = raw.get("graphify", {})
     scope = raw.get("scope", {})
     scope_mode = str(scope.get("mode", "enforce"))
-    if scope_mode not in ("enforce", "warn", "off"):
-        raise ValueError("[scope] mode must be 'enforce', 'warn' or 'off'")
+    symbol_mode = str(scope.get("symbols", "warn"))
+    for key, value in (("mode", scope_mode), ("symbols", symbol_mode)):
+        if value not in ("enforce", "warn", "off"):
+            raise ValueError(f"[scope] {key} must be 'enforce', 'warn' or 'off'")
     status_regex = str(project.get("status_regex", Config.status_regex))
     _regex(status_regex, "[project] status_regex")
     if re.compile(status_regex).groups < 2:
@@ -226,6 +229,7 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
         graphify_version=str(graph.get("version", GRAPHIFY_VERSION)),
         review_skip=_review_skip(raw.get("review", {})),
         scope_mode=scope_mode,
+        symbol_mode=symbol_mode,
         scope_allow=_tuple(scope.get("allow")),
     )
 

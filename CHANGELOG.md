@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 (2026-11-10)
+
+### Added
+- Symbol check inside planned files: public functions, classes and methods that a run adds or changes in an existing file must be named in backticks in the plan or tasks. Python is compared by syntax tree, JavaScript and TypeScript see new exports. `[scope] symbols` is `warn` (default; printed on `sdd done`), `enforce` or `off`; `sdd scope` lists them too.
+
 ## 0.4.0 (2026-11-10)
 
 ### Added
