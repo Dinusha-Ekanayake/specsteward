@@ -213,13 +213,13 @@ def test_concurrent_state_updates_are_not_lost(repo: Path) -> None:
 
     cfg = config.load(repo)
     run_state.start(cfg, "009", check_branch=False)
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
 
     def work() -> None:
         try:
             for _ in range(5):
                 run_state.observe_agent(cfg, "specsteward:implementer", None)
-        except BaseException as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(exc)
 
     # threads share the re-entrancy flag's thread-local, so each takes the lock for real
