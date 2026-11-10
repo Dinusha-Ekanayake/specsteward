@@ -19,7 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from specsteward import prereqs, secret_store
-from specsteward.remote import CHANNELS, Channel, state_dir
+from specsteward.remote import CHANNELS, Channel, env_without_tokens, state_dir
 
 MARKETPLACE = "claude-plugins-official"
 LAUNCHER = "claude-phone"
@@ -53,6 +53,7 @@ def _claude(args: list[str]) -> tuple[int, str]:
             timeout=CLAUDE_TIMEOUT,
             check=False,
             stdin=subprocess.DEVNULL,
+            env=env_without_tokens(),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         return 1, str(error)
@@ -226,6 +227,7 @@ def lock(channel: Channel, directory: Path | None = None) -> str:
     access["dmPolicy"] = "allowlist"
     tmp = access_file.with_suffix(".tmp")
     tmp.write_text(json.dumps(access, indent=2) + "\n", encoding="utf-8")
+    tmp.chmod(0o600)  # the allowlist decides who can answer prompts: owner only
     os.replace(tmp, access_file)
     return f"{channel.name} locked: only account {paired[0]} can use the bot"
 

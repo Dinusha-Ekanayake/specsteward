@@ -239,13 +239,26 @@ def _utf8_output() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+GUARD_HOOKS = frozenset(("hook-guard", "hook-shell-guard"))
+
+
 def _hook(command: str) -> int:
     """Hooks never fail the session: outside an sdd project they do nothing, and an error
     inside one is reported on stderr instead of breaking the user's turn."""
+    start = _start_dir()
     try:
-        cfg = cfg_mod.load(_start_dir())
-    except (ValueError, OSError):
-        return 0
+        cfg = cfg_mod.load(start)
+    except (ValueError, OSError) as error:
+        try:
+            root = cfg_mod.find_root(start)
+        except ValueError:
+            return 0  # no sdd.toml here: not an sdd project
+        if command not in GUARD_HOOKS:
+            return 0
+        # sdd.toml exists but is unusable (corrupted, or edited to break the hooks): keep
+        # guarding with the defaults instead of going quiet.
+        print(f"specsteward {command}: {error}; guarding with the defaults", file=sys.stderr)
+        cfg = cfg_mod.Config(root=root)
     try:
         _dispatch_hook(command, cfg)
     except Exception as error:  # noqa: BLE001 - a hook must never take the session down
@@ -374,6 +387,12 @@ def _doctor(as_json: bool) -> int:
 
 
 def _check(cfg: cfg_mod.Config, task: str | None) -> int:
+    active = run_state.load(cfg.root)
+    if active is not None and active["active"]:
+        problem = run_state.config_problem(cfg, active)
+        if problem:
+            print(f"SDD CHECK: BLOCKED. {problem}")
+            return 1
     before = run_state.run_tree(cfg)  # the gate runs project code; see record_pass
     results = run_all(cfg)
     print(format_report(results))
@@ -448,6 +467,7 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         return 0 if path else 1
     if command == "trust":
         print(f"trusted {cfg_mod.CONFIG_FILE} ({trust.trust_config(root)[:12]})")
+        run_state.rebaseline_config(root)
         trust.record_guard(root, cfg.guard)
         print("gate config files re-baselined")
         return 0

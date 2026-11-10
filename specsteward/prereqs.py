@@ -22,7 +22,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from specsteward.remote import CHANNELS, configured
+from specsteward.remote import CHANNELS, configured, env_without_tokens
 from specsteward.trust import user_dir
 
 BUN_VERSION = "1.4.4"  # pinned; bump deliberately after checking the release notes
@@ -66,6 +66,7 @@ def _run(cmd: list[str]) -> int:
                 stderr=subprocess.STDOUT,
                 check=False,
                 timeout=INSTALL_TIMEOUT,
+                env=env_without_tokens(),
             ).returncode
     except (OSError, subprocess.TimeoutExpired):
         return 1
@@ -74,7 +75,7 @@ def _run(cmd: list[str]) -> int:
 def _fetch(url: str, target: Path) -> None:
     if not url.startswith("https://raw.githubusercontent.com/oven-sh/bun/"):
         raise ValueError(f"refusing to download an installer from {url}")
-    with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 - fixed https URL
+    with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310  # nosec B310
         target.write_bytes(response.read())
 
 

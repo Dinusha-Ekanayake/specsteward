@@ -39,7 +39,9 @@ def _fetch(url: str, body: dict[str, Any] | None, headers: dict[str, str]) -> tu
     if data is not None:
         request.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:  # noqa: S310
+        with urllib.request.urlopen(  # noqa: S310  # nosec B310
+            request, timeout=HTTP_TIMEOUT
+        ) as response:
             return response.status, json.loads(response.read() or b"null")
     except urllib.error.HTTPError as error:
         try:

@@ -105,7 +105,7 @@ def test_python_placeholder_prefers_the_project_venv(tmp_path: Path) -> None:
     assert project_python(tmp_path) == sys.executable
     venv = tmp_path / ".venv" / "bin" / "python"
     venv.parent.mkdir(parents=True)
-    venv.write_text("")
+    venv.write_bytes(b"\x7fELF\x02\x01")  # a native executable, as a real venv holds
     assert project_python(tmp_path) == sys.executable  # no pyvenv.cfg: not a venv
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
     assert project_python(tmp_path) == str(venv)
@@ -145,3 +145,11 @@ def test_bun_runs_the_projects_test_script(tmp_path: Path) -> None:
     (tmp_path / "bun.lockb").write_text("", encoding="utf-8")
     tests = next(step for step in preset_for(tmp_path, "node").checks if step.name == "tests")
     assert tests.cmd == ("bun", "run", "test")
+
+
+def test_a_script_posing_as_the_venv_python_is_never_used(tmp_path: Path) -> None:
+    venv = tmp_path / ".venv" / "bin" / "python"
+    venv.parent.mkdir(parents=True)
+    venv.write_text("#!/bin/sh\necho passed\n")
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    assert project_python(tmp_path) == sys.executable

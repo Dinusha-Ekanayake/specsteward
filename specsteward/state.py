@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from specsteward import scope, trust, usage
-from specsteward.config import SPEC_NUMBER, Config
+from specsteward.config import CONFIG_FILE, SPEC_NUMBER, Config
 from specsteward.dashboard import write_dashboard
 from specsteward.graph import ensure_ignores
 from specsteward.safefs import ensure_safe
@@ -235,7 +235,7 @@ def create_worktree(cfg: Config, spec: str) -> Path:
             continue
         ensure_safe(target, copy)
         if source.is_dir():
-            shutil.copytree(source, copy)
+            shutil.copytree(source, copy, symlinks=True)
         else:
             shutil.copy2(source, copy)
     return target
@@ -300,7 +300,33 @@ def tick_problem(cfg: Config, state: State) -> str | None:
 def integrity_problem(cfg: Config, state: State) -> str | None:
     """Approval and ticks, checked before anything trusts the spec or the task table."""
     directory = cfg.root / state["spec_dir"]
-    return approval_problem(cfg, state["spec"], directory) or tick_problem(cfg, state)
+    return (
+        approval_problem(cfg, state["spec"], directory)
+        or tick_problem(cfg, state)
+        or config_problem(cfg, state)
+    )
+
+
+def config_problem(cfg: Config, state: State) -> str | None:
+    """sdd.toml is bound to the run: trust remembers older versions too, so swapping one
+    back in (a weaker gate, a wider scope) would otherwise look trusted."""
+    recorded = state.get("config_hash")
+    if recorded is None or trust.file_hash(cfg.root / CONFIG_FILE) == recorded:
+        return None
+    return (
+        f"{CONFIG_FILE} changed since the run started; review it, run `sdd trust` "
+        "and then `sdd resume`"
+    )
+
+
+@locked
+def rebaseline_config(root: Path) -> None:
+    """After `sdd trust`: the reviewed sdd.toml is the one this run now follows."""
+    state = load(root)
+    if state is None or not state["active"]:
+        return
+    state["config_hash"] = trust.file_hash(root / CONFIG_FILE)
+    save(root, state)
 
 
 def approval_problem(cfg: Config, spec: str, directory: Path) -> str | None:
@@ -356,6 +382,7 @@ def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
         "started_at": datetime.now(UTC).isoformat(),
         "usage": usage.empty(),
         "gate": _fresh_gate([]),
+        "config_hash": trust.file_hash(cfg.root / CONFIG_FILE),
         "scope": scope.snapshot(cfg.root),
         "tasks": {},
     }
@@ -480,8 +507,11 @@ def bind_owner(cfg: Config, payload: dict[str, Any]) -> State | None:
     if not session_id or not _OWNING_COMMAND.search(command):
         return None
     state = load(cfg.root)
-    if state is None or not state["active"] or state.get("owner_session") == session_id:
+    if state is None or not state["active"]:
         return None
+    if state.get("owner_session") == session_id:
+        return None
+    state["hooks_live"] = True  # this hook ran, so SubagentStop is installed too
     state["owner_session"] = str(session_id)
     save(cfg.root, state)
     return state
@@ -596,7 +626,7 @@ def _review_witnessed(state: State) -> bool:
     Enforced only once the hook has observed any subagent in this run; where the hook
     does not fire (an older Claude Code) the verdict stays honour-based.
     """
-    if not int(state.get("observed_agent_runs", 0)):
+    if not int(state.get("observed_agent_runs", 0)) and not state.get("hooks_live"):
         return True
     passed_at = _gate(state).get("passed_at")
     if passed_at is not None and float(state.get("last_reviewer_at", 0)) < float(passed_at):
@@ -619,7 +649,7 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
             "run specsteward:reviewer first (a verdict is not taken on trust)"
         )
     entry["review_rounds"] += 1
-    if verdict == "clean" and int(state.get("observed_agent_runs", 0)):
+    if verdict == "clean" and (int(state.get("observed_agent_runs", 0)) or state.get("hooks_live")):
         state["accepted_reviews"] = int(state.get("accepted_reviews", 0)) + 1
     _gate(state)["reviewed"] = tree(cfg.root, state) if verdict == "clean" else None
     if verdict == "changes" and entry["review_rounds"] >= cfg.limits.max_review_rounds:

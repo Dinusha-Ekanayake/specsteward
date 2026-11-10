@@ -3,6 +3,17 @@
 ## 0.6.0 (2026-11-10)
 
 ### Security
+- Found by an independent audit and fixed:
+  - The shell guard now looks through quoting, escapes, letter case, wildcards, `cd` into protected folders, `env`/`sudo`/`nohup` prefixes, `bash -lc`, here-documents and shells fed from a pipe, and asks for inline interpreter code that names run state or the environment. It also guards the Windows PowerShell tool (the hooks and the `ask` rules covered only Bash there).
+  - Guard hooks keep guarding when `sdd.toml` is unparsable instead of going quiet.
+  - `sdd.toml` is bound to the run, so swapping back an older trusted version halts the run until you trust it again.
+  - `{python}` no longer resolves to a committed-symlink or script "venv", and bare commands are never taken from the working directory on Windows.
+  - Scope sees renames and deletions, glob patterns no longer cross folders, and folders named like tools (`venv`, `node_modules`) are only skipped at the top level.
+  - The bot token is removed from the environment of all child processes; `access.json` is written owner-only.
+  - `sdd init --specs-dir` is validated; a generated config that runs the repository's own scripts is not trusted automatically; `ensure_safe` resolves `..`.
+  - Config regexes with nested quantifiers are refused; hostile source files can no longer crash the symbol scan.
+  - `phone`, `install`, `worktree` and `init` ask first; clean review verdicts need a witnessed reviewer once the hooks are known to be live.
+  - CI: tool versions pinned in `requirements-dev.txt`, a `bandit` step, `CODEOWNERS`, Dependabot for pip.
 - Phone pairing no longer trusts a display name: the wizard prints a random one-time code and pairs only the account that sends exactly that code. Text from strangers is printed without control or bidirectional characters.
 
 ### Fixed

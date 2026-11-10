@@ -495,3 +495,58 @@ def test_hooks_json_matches_the_powershell_tool_too() -> None:
     for event in ("PreToolUse", "PostToolUse"):
         matchers = [group.get("matcher", "") for group in hooks["hooks"][event]]
         assert "Bash|PowerShell" in matchers
+
+
+# --- security audit: scope, globs and tool folders ---------------------------------------------
+
+
+def test_renames_into_the_allowed_tests_folder_are_seen(repo: Path) -> None:
+    import subprocess
+
+    from specsteward import scope
+    from specsteward import state as run_state
+
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "auth.py").write_text("def login():\n    return 1\n", encoding="utf-8")
+    plan = repo / "specs" / "009-demo" / "plan.md"
+    plan.write_text("# Plan\n\n| `src/other.py` | one |\n", encoding="utf-8")
+    cfg = config.load(repo)
+    _git_repo(repo)
+    run_state.approve(cfg, "009", "test")
+    run_state.start(cfg, "009", check_branch=False)
+    (repo / "tests").mkdir(exist_ok=True)
+    subprocess.run(
+        ["git", "mv", "src/auth.py", "tests/auth_moved.py"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    assert "src/auth.py" in scope.out_of_scope(cfg, run_state.require(repo))
+
+
+def test_globs_do_not_cross_folders_with_a_single_star() -> None:
+    from specsteward.scope import _matches
+
+    assert _matches("pkg/test_a.py", "**/test_*")
+    assert _matches("test_a.py", "**/test_*")
+    assert not _matches("src/test_pkg/prod.py", "**/test_*")
+    assert _matches("tests/deep/x.py", "tests/**")
+    assert not _matches("src/a/b.ts", "src/*.ts")
+    assert _matches("src/a.ts", "src/*.ts")
+
+
+def test_a_folder_named_venv_inside_the_project_is_not_hidden(repo: Path) -> None:
+    from specsteward.worktree import fingerprint
+
+    nested = repo / "src" / "venv"
+    nested.mkdir(parents=True)
+    (nested / "m.py").write_text("a = 1\n", encoding="utf-8")
+    before = fingerprint(repo)
+    (nested / "m.py").write_text("a = 2\n", encoding="utf-8")
+    assert fingerprint(repo) != before
+
+
+def test_hostile_source_does_not_crash_the_symbol_scan() -> None:
+    from specsteward.scope import _py_symbols
+
+    assert _py_symbols("x = " + "(" * 5000 + "1" + ")" * 5000) == {}

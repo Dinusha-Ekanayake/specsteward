@@ -118,11 +118,14 @@ class Config:
         return matches[0]
 
     def status_of(self, spec_text: str) -> str:
-        match = re.search(self.status_regex, spec_text)
+        match = re.search(self.status_regex, spec_text[:MAX_STATUS_TEXT])
         return match.group(2).strip() if match else ""
 
     def is_approved(self, spec_text: str) -> bool:
         return self.status_of(spec_text).startswith(self.approved_word)
+
+
+MAX_STATUS_TEXT = 200_000  # the status line is near the top; never scan a huge file
 
 
 def _tuple(value: Any) -> tuple[str, ...]:
@@ -140,12 +143,50 @@ def _review_skip(raw: dict[str, Any]) -> tuple[str, ...]:
     return skip
 
 
+def _nested_quantifier(pattern: str) -> bool:
+    """True when a group that is repeated contains something repeated, such as `(a+)+`.
+
+    That shape backtracks exponentially on crafted text, and config patterns run over files
+    a repository controls, before and after the user trusts the config.
+    """
+    stack: list[bool] = []  # per open group: does it contain a quantifier?
+    index, in_class = 0, False
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            index += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+        elif char == "[":
+            in_class = True
+        elif char == "(":
+            stack.append(False)
+        elif char == ")" and stack:
+            inner = stack.pop()
+            after = pattern[index + 1 : index + 2]
+            repeated = after in ("+", "*", "{")
+            if repeated and inner:
+                return True
+            if stack and (inner or repeated):
+                stack[-1] = True
+        elif char in "+*{" and stack:
+            stack[-1] = True
+        index += 1
+    return False
+
+
 def _regex(pattern: str, where: str) -> None:
     """Compile at load time, so a bad regex fails `sdd` with a clear message, not mid-run."""
     try:
         re.compile(pattern)
     except re.error as error:
         raise ValueError(f"{where}: invalid regex {pattern!r}: {error}") from error
+    if _nested_quantifier(pattern):
+        raise ValueError(
+            f"{where}: regex {pattern!r} repeats a group that repeats; that can hang on "
+            "crafted text, so write it without nested quantifiers"
+        )
 
 
 def _steps(raw: list[dict[str, Any]]) -> tuple[CheckStep, ...]:

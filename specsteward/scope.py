@@ -11,13 +11,12 @@ import ast
 import hashlib
 import re
 import subprocess
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
 from specsteward.config import Config
 from specsteward.safefs import ensure_safe
-from specsteward.worktree import SKIP_DIRS, SKIP_FILES, TOP_LEVEL_SKIP
+from specsteward.worktree import _skipped
 
 DEFAULT_ALLOW = (
     "tests/**",
@@ -51,7 +50,9 @@ def head(root: Path) -> str | None:
 
 
 def _changed_now(root: Path, base: str | None) -> set[str]:
-    tracked = _git(root, "diff", "--name-only", "-z", base or "HEAD") if base else []
+    tracked = (
+        _git(root, "diff", "--name-only", "--no-renames", "-z", base or "HEAD") if base else []
+    )
     untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
     if tracked is None or untracked is None:
         return set()
@@ -116,21 +117,33 @@ def planned_paths(plan: str) -> list[str]:
     return found
 
 
+def _glob(pattern: str) -> re.Pattern[str]:
+    """`**` crosses folders, `*` and `?` stay inside one, so `**/test_*` is a file name."""
+    out, index = "", 0
+    while index < len(pattern):
+        if pattern.startswith("**/", index):
+            out, index = out + "(?:.*/)?", index + 3
+        elif pattern.startswith("**", index):
+            out, index = out + ".*", index + 2
+        elif pattern[index] == "*":
+            out, index = out + "[^/]*", index + 1
+        elif pattern[index] == "?":
+            out, index = out + "[^/]", index + 1
+        else:
+            out, index = out + re.escape(pattern[index]), index + 1
+    return re.compile(out)
+
+
 def _matches(path: str, pattern: str) -> bool:
     if pattern.endswith("/"):
         return path.startswith(pattern)
-    if any(char in pattern for char in "*?["):
-        return fnmatchcase(path, pattern) or fnmatchcase(path, pattern.replace("**/", ""))
+    if any(char in pattern for char in "*?"):
+        return _glob(pattern).fullmatch(path) is not None
     return path == pattern or path.startswith(pattern + "/")
 
 
 def _ignored(path: str) -> bool:
-    parts = path.split("/")
-    return (
-        parts[-1] in SKIP_FILES
-        or bool(SKIP_DIRS & set(parts[:-1]))
-        or (len(parts) > 1 and parts[0] in TOP_LEVEL_SKIP)
-    )
+    return _skipped(path, set())
 
 
 def out_of_scope(cfg: Config, state: dict[str, Any]) -> list[str]:
@@ -207,7 +220,7 @@ def _py_symbols(source: str) -> dict[str, str]:
     """Public top-level functions, classes and methods, each with a hash of its code."""
     try:
         tree = ast.parse(source)
-    except (SyntaxError, ValueError):
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
         return {}
     found: dict[str, str] = {}
     funcs = (ast.FunctionDef, ast.AsyncFunctionDef)

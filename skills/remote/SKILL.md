@@ -14,7 +14,8 @@ sessions and turns it on only in sessions started with `claude-phone`.
 1. Run `bash .sdd/bin/sdd remote`. If `ready` is true and this session receives messages,
    say so and stop. If nothing is set up, ask once which app the user prefers (Telegram is
    the default); `<ch>` below is `telegram` or `discord`.
-2. Run `bash .sdd/bin/sdd phone setup --channel <ch> --no-input` without asking. It installs
+2. Run `bash .sdd/bin/sdd phone setup --channel <ch> --no-input` without asking the user in
+   chat (Claude Code itself shows a permission prompt, since it installs software). It installs
    Bun and the official plugin, switches the plugin off in ordinary sessions, and installs
    the `claude-phone` command. Show its output; if a line says FAIL, show the fix.
 3. Tell the user to finish in a terminal of their own (not this session: the token is typed

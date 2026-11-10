@@ -22,8 +22,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install pytest pytest-cov ruff mypy
+      - run: python -m pip install -r requirements-dev.txt
       - run: ruff check .
+      - run: bandit -q -r specsteward -ll  # static security scan; medium and above fail
       - run: ruff format --check .
       - run: mypy
       - run: pytest -q --cov
@@ -70,7 +71,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - run: python -m pip install uv
+      - run: python -m pip install uv==0.11.28
       - name: Install the pinned graphify with its lock
         shell: bash
         run: |

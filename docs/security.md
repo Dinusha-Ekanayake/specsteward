@@ -2,7 +2,7 @@
 
 ## Known limits
 
-- `sdd review <task> clean` is only partly a gate: once the SubagentStop hook has seen a subagent in the run, each clean verdict needs a `specsteward:reviewer` run that finished since the last one. Where the hook does not fire (older Claude Code) it stays honour-based, and the main agent could still record a verdict after a reviewer it ignored. Approval, trust, start, resume and sign-off are the tamper-proof gates.
+- `sdd review <task> clean` is only partly a gate: once the plugin's hooks have been seen working in the run (the bind hook marks it when `sdd start` runs, or a subagent was observed), each clean verdict needs a `specsteward:reviewer` run that finished since the last one. Where the hook does not fire (older Claude Code) it stays honour-based, and the main agent could still record a verdict after a reviewer it ignored. Approval, trust, start, resume and sign-off are the tamper-proof gates.
 - Trust and approvals are keyed by the git repository, so two sdd projects in one repository share them.
 
 ## What specsteward can do
@@ -44,7 +44,14 @@ Check commands with a path separator are looked up in the repository; bare names
 ## What is not covered
 
 - **The gate runs project code as you.** `sdd check` is allow-listed and runs the project's tests, which the implementer writes. Test code can do anything your account can, including editing the trust store or `.sdd/`. Only Claude Code's sandbox (`"sandbox": {"enabled": true}`, limiting writes to the project) contains that; turn it on for unattended runs. specsteward only makes sure a pass is recorded for the tree the gate actually saw.
-- The shell guard reads the command text. A command can still hide its target (a script file, an encoded string), so it is a second line of defence: arbitrary shell commands are not allow-listed, so they prompt anyway, and only the sandbox truly contains them.
+- The shell guard reads the command text, for both the Bash and the PowerShell tool. It looks through quoting, escapes, case, wildcards, `cd` into a protected folder, `env`/`sudo`/`nohup` prefixes, nested shells, `eval`/`Invoke-Expression`, here-documents and shells fed from a pipe, and asks for inline `python -c`/`node -e` code that names run state or the environment. It is still a text check: a command can hide its target in a script file the agent wrote earlier, so it is a second line of defence. Arbitrary shell commands are not allow-listed, so they prompt anyway, the `Edit(...)` deny rules block the file tools, and only the sandbox truly contains a shell.
+- If `sdd.toml` cannot be parsed, the guard hooks keep guarding with the defaults and say so on stderr; other hooks stay quiet.
+- `sdd.toml` is bound to the run: if it changes after `sdd start` (even to an older version you once trusted), the run halts until you review it, run `sdd trust` and `sdd resume`.
+- `{python}` in a check resolves to a project virtual environment only if it is untracked, not a symlink, and a native interpreter (not a script). A bare command name is looked up on `PATH`, never in the working directory.
+- The phone bot token is removed from the environment of every child process specsteward starts (checks, formatters, the graph builder, installers, the `claude` CLI). The channel plugin itself still needs it, so an agent that can run arbitrary code in a `claude-phone` session can read it from its own environment; the sandbox is the control for that.
+- `sdd init` refuses a `--specs-dir` that is not a plain relative folder, and does not trust a generated config whose commands start the repository's own scripts (`npm run`, `make`, ...); you review it and run `sdd trust`.
+- `sdd phone`, `install`, `worktree` and `init` ask first, since they install software or create files outside the run loop.
+- Static analysis: `bandit` runs in CI and fails on medium and higher findings; CodeQL runs on every pull request; CI tools are pinned in `requirements-dev.txt`.
 - The trust store is a plain file in your home directory. It keeps out file-tool edits from agents, not code that runs as you (see above) or someone with access to your account.
 - The `via` field in `.sdd/approvals.log` is reported by the caller. The permission prompt is the real gate.
 - Review verdicts are reported by the orchestrator from the reviewer's output.

@@ -32,6 +32,13 @@ CHANNELS = (
 TELEGRAM = CHANNELS[0]
 
 
+def env_without_tokens() -> dict[str, str]:
+    """This environment minus the phone bot tokens, for any child process that has no use
+    for them (checks, formatters, installers, the graph builder, the claude CLI)."""
+    secret = {channel.token_var for channel in CHANNELS}
+    return {key: value for key, value in os.environ.items() if key not in secret}
+
+
 def state_dir(channel: Channel = TELEGRAM) -> Path:
     default = Path.home() / ".claude" / "channels" / channel.name
     return Path(os.environ.get(channel.dir_var) or default)
