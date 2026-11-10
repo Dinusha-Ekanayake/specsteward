@@ -473,7 +473,7 @@ def test_init_adds_powershell_gates_and_doctor_reports_them_when_missing(tmp_pat
     import json
     import sys
 
-    from specsteward.doctor import run_doctor
+    from specsteward.doctor import FAIL, WARN, run_doctor
     from specsteward.init import POWERSHELL_ASK, init_project
 
     init_project(tmp_path, "generic")
@@ -485,7 +485,7 @@ def test_init_adds_powershell_gates_and_doctor_reports_them_when_missing(tmp_pat
     settings.write_text(json.dumps(data), encoding="utf-8")
     found = [f for f in run_doctor(tmp_path) if "PowerShell tool" in f.what]
     assert len(found) == 1
-    assert found[0].level == ("FAIL" if sys.platform == "win32" else "WARN")
+    assert found[0].level == (FAIL if sys.platform == "win32" else WARN)
 
 
 def test_hooks_json_matches_the_powershell_tool_too() -> None:
