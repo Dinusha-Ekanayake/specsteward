@@ -470,7 +470,6 @@ def test_other_tools_are_still_ignored_by_the_shell_guard() -> None:
 
 
 def test_init_adds_powershell_gates_and_doctor_reports_them_when_missing(tmp_path: Path) -> None:
-    import json
     import sys
 
     from specsteward.doctor import FAIL, WARN, run_doctor
@@ -489,7 +488,6 @@ def test_init_adds_powershell_gates_and_doctor_reports_them_when_missing(tmp_pat
 
 
 def test_hooks_json_matches_the_powershell_tool_too() -> None:
-    import json
 
     hooks = json.loads((Path(__file__).parent.parent / "hooks" / "hooks.json").read_text("utf-8"))
     for event in ("PreToolUse", "PostToolUse"):
