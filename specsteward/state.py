@@ -436,6 +436,8 @@ def observe_agent(
     if owned_elsewhere(state, session_id):
         return None  # another session's subagent is not part of this run
     state["observed_agent_runs"] = int(state.get("observed_agent_runs", 0)) + 1
+    if str(agent_type or "").endswith("reviewer"):
+        state["observed_reviews"] = int(state.get("observed_reviews", 0)) + 1
     return _cap_agents(cfg, state)
 
 
@@ -517,6 +519,17 @@ def record_failure(cfg: Config, task_id: str, signature: str) -> State:
     return state
 
 
+def _review_witnessed(state: State) -> bool:
+    """A clean verdict needs a reviewer subagent the SubagentStop hook saw finish.
+
+    Enforced only once the hook has observed any subagent in this run; where the hook
+    does not fire (an older Claude Code) the verdict stays honour-based.
+    """
+    if not int(state.get("observed_agent_runs", 0)):
+        return True
+    return int(state.get("observed_reviews", 0)) > int(state.get("accepted_reviews", 0))
+
+
 def record_review(cfg: Config, task_id: str, verdict: str) -> State:
     if verdict not in ("clean", "changes"):
         raise ValueError("verdict must be 'clean' or 'changes'")
@@ -525,7 +538,14 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
     if group and task_id not in group:
         raise ValueError(f"{task_id} is not in the group in flight ({group}); review that group")
     entry = _task(state, task_id)
+    if verdict == "clean" and not _review_witnessed(state):
+        raise ValueError(
+            "no reviewer subagent has finished since the last clean verdict; "
+            "run specsteward:reviewer first (a verdict is not taken on trust)"
+        )
     entry["review_rounds"] += 1
+    if verdict == "clean" and int(state.get("observed_agent_runs", 0)):
+        state["accepted_reviews"] = int(state.get("accepted_reviews", 0)) + 1
     _gate(state)["reviewed"] = tree(cfg.root, state) if verdict == "clean" else None
     if verdict == "changes" and entry["review_rounds"] >= cfg.limits.max_review_rounds:
         return halt(cfg.root, state, f"{task_id}: review round cap reached with open findings")

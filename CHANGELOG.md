@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.6 (2026-11-10)
+
+### Changed
+- A clean review verdict (`sdd review <task> clean`) now needs a `specsteward:reviewer` subagent that the SubagentStop hook saw finish since the previous clean verdict, so an agent can no longer record a review nobody ran. Without hook evidence (older Claude Code) it stays honour-based.
+
 ## 0.3.5 (2026-11-10)
 
 ### Fixed
