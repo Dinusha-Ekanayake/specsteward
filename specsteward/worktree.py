@@ -6,9 +6,10 @@ untracked files; run state and the task table being ticked are left out.
 """
 
 import hashlib
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
+
+from specsteward import gitsafe
 
 # Never part of the fingerprint, whatever the project's .gitignore says: specsteward's own
 # state, the code graph, environments, and files that tools regenerate when tests run.
@@ -35,11 +36,7 @@ def _skipped(rel: str, excluded: set[str]) -> bool:
 
 
 def _git(root: Path, *args: str) -> bytes | None:
-    try:
-        proc = subprocess.run(["git", *args], cwd=root, capture_output=True, check=False)
-    except OSError:
-        return None
-    return proc.stdout if proc.returncode == 0 else None
+    return gitsafe.output(root, *args)
 
 
 def _hash_files(root: Path, paths: list[Path], update: Callable[[bytes], None]) -> None:
@@ -70,6 +67,8 @@ def fingerprint(root: Path, exclude: tuple[str, ...] = ()) -> str:
     if names is not None:
         digest.update(b"git\0" + (diff or b""))
         rels = [name for name in names.decode("utf-8", "replace").split("\0") if name]
+        # files git was told to treat as unchanged are hashed by content, so they still count
+        rels += [rel for rel in gitsafe.hidden_edits(root) if rel not in rels]
         _hash_files(
             root, [root / rel for rel in rels if not _skipped(rel, excluded)], digest.update
         )

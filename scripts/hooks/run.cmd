@@ -18,7 +18,7 @@ rem 1. Where Claude Code was told Git Bash is.
 if defined CLAUDE_CODE_GIT_BASH_PATH if exist "%CLAUDE_CODE_GIT_BASH_PATH%" set "GITBASH=%CLAUDE_CODE_GIT_BASH_PATH%"
 
 rem 2. Next to git.exe (...\Git\cmd\git.exe or ...\Git\bin\git.exe), wherever Git is installed.
-if not defined GITBASH for /f "delims=" %%G in ('where git 2^>nul') do if not defined GITBASH (
+if not defined GITBASH for /f "delims=" %%G in ('where $PATH:git 2^>nul') do if not defined GITBASH (
   if exist "%%~dpG..\bin\bash.exe" set "GITBASH=%%~dpG..\bin\bash.exe"
 )
 
@@ -28,8 +28,8 @@ if not defined GITBASH if exist "%ProgramFiles(x86)%\Git\bin\bash.exe" set "GITB
 if not defined GITBASH if exist "%LocalAppData%\Programs\Git\bin\bash.exe" set "GITBASH=%LocalAppData%\Programs\Git\bin\bash.exe"
 
 rem 4. Any other bash on PATH, but not the WSL launcher or the Store stub.
-if not defined GITBASH for /f "delims=" %%B in ('where bash 2^>nul') do if not defined GITBASH (
-  echo %%B | findstr /i /c:"\Windows\System32" /c:"\WindowsApps" >nul || set "GITBASH=%%B"
+if not defined GITBASH for /f "delims=" %%B in ('where $PATH:bash 2^>nul') do if not defined GITBASH (
+  echo "%%B" | findstr /i /c:"\Windows\System32" /c:"\WindowsApps" >nul || set "GITBASH=%%B"
 )
 
 if not defined GITBASH (

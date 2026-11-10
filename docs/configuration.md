@@ -104,7 +104,7 @@ report = "coverage.xml"   # Cobertura XML or lcov file your test step writes; ""
 mode = "warn"             # enforce | warn | off
 ```
 
-Point `report` at the file your own test step produces (`pytest --cov --cov-report=xml`, `jest --coverage --coverageReporters=lcov` and so on) and add the flag to the `[[check]]` test command. `sdd done` then compares the report with the lines changed since the run started. A report that is missing, unreadable or older than the changes counts as a finding, so the gate has to be run again after the last edit. In `enforce` mode `sdd done` refuses until each finding is fixed, named in the plan (which needs approval again) or reverted. The defaults are `warn`.
+Point `report` at the file your own test step produces (`pytest --cov --cov-report=xml`, `jest --coverage --coverageReporters=lcov` and so on) and add the flag to the `[[check]]` test command. `sdd done` then compares the report with the lines changed since the run started. A report that is missing, unreadable or older than the changes counts as a finding, and at `sdd done` the report must be the very file the last passing gate left behind, so one edited by hand afterwards does not count. Keep the report out of git: `coverage.xml` and a top-level `coverage/` folder are already ignored by the scope guard; put any other location in `.gitignore`. In `enforce` mode `sdd done` refuses until each finding is fixed, named in the plan (which needs approval again) or reverted. The defaults are `warn`.
 
 ## `[tdd]`
 

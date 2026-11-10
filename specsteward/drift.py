@@ -13,6 +13,7 @@ Three cheap, deterministic checks narrow that gap (none of them proves the code 
 
 import ast
 import difflib
+import hashlib
 import re
 import xml.etree.ElementTree as ET  # nosec B405 - reads the project's own coverage report
 from pathlib import Path
@@ -29,12 +30,15 @@ CODE_SUFFIXES = (".py", ".js", ".jsx", ".ts", ".tsx", ".mjs")
 PY_MODULES = frozenset(
     ("subprocess", "socket", "urllib", "http", "requests", "httpx", "aiohttp", "ctypes")
     + ("pickle", "marshal", "shelve", "ftplib", "smtplib", "telnetlib", "paramiko")
-    + ("multiprocessing", "webbrowser")
+    + ("multiprocessing", "webbrowser", "importlib")
 )
 PY_CALLS = frozenset(
     ("os.system", "os.popen", "os.remove", "os.unlink", "os.rmdir", "os.removedirs")
     + ("os.execv", "os.execvp", "os.kill", "shutil.rmtree", "eval", "exec", "__import__")
 )
+# Parts of a watched package that only handle text or constants.
+PY_SAFE = frozenset(("urllib.parse", "urllib.error", "http.cookies", "http.HTTPStatus"))
+PY_SAFE |= frozenset(("http.HTTPMethod", "importlib.metadata", "importlib.resources"))
 JS_MODULES = "child_process|fs|net|http|https|dgram|vm|worker_threads|cluster"
 JS_REQUIRE = re.compile(rf"""require\(\s*['"](?:node:)?({JS_MODULES})['"]\s*\)""")
 JS_IMPORT = re.compile(rf"""from\s+['"](?:node:)?({JS_MODULES})['"]""")
@@ -46,8 +50,8 @@ JS_CALLS = re.compile(r"\b(eval)\s*\(|\bnew\s+(Function)\s*\(")
 
 def added_lines(before: str | None, after: str) -> set[int]:
     """1-based numbers of the lines in ``after`` that are new or different."""
-    new = after.splitlines()
-    old = before.splitlines() if before is not None else []
+    new = _lines(after)
+    old = _lines(before) if before is not None else []
     if before is None or len(old) + len(new) > MAX_DIFF_LINES:
         return set(range(1, len(new) + 1))
     found: set[int] = set()
@@ -56,6 +60,13 @@ def added_lines(before: str | None, after: str) -> set[int]:
         if tag in ("insert", "replace"):
             found.update(range(j1 + 1, j2 + 1))
     return found
+
+
+def _lines(text: str) -> list[str]:
+    """Lines as Python and coverage tools count them (`str.splitlines` also breaks on form
+    feeds and U+2028, which would shift every later number)."""
+    lines = re.split(r"\r\n|\r|\n", text)
+    return lines[:-1] if lines and lines[-1] == "" else lines
 
 
 def _ranges(numbers: list[int]) -> str:
@@ -108,16 +119,55 @@ def read_coverage(path: Path) -> dict[str, dict[int, int]]:
 
 
 def _lookup(covered: dict[str, dict[int, int]], path: str) -> dict[int, int] | None:
+    """The report's entry for ``path``. Reports name files relative to their own source
+    root (`mod.py` for `src/mod.py`) or absolutely, so the longest matching tail wins and a
+    name that fits two changed files the same way is not guessed at."""
+    if path in covered:
+        return covered[path]
+    best: list[tuple[int, dict[int, int]]] = []
     for name, lines in covered.items():
-        if name == path or path.endswith("/" + name) or name.endswith("/" + path):
-            return lines
-    return None
+        if path.endswith("/" + name) or name.endswith("/" + path):
+            best.append((min(len(name), len(path)), lines))
+    if not best:
+        return None
+    best.sort(key=lambda pair: pair[0], reverse=True)
+    if len(best) > 1 and best[0][0] == best[1][0]:
+        return None  # two equally good candidates: report it as not measured
+    return best[0][1]
 
 
-def uncovered(cfg: Config, state: dict[str, Any]) -> list[str]:
-    """Changed lines no test ran, from the project's coverage report; empty when not set up."""
+def report_digest(cfg: Config) -> str | None:
+    """Hash of the coverage report as the passing gate left it, or None when unused."""
+    if cfg.coverage_mode == "off" or not cfg.coverage_report:
+        return None
+    report = cfg.root / cfg.coverage_report
+    try:
+        ensure_safe(cfg.root, report)
+        return hashlib.sha256(report.read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        return None
+
+
+Source = tuple[str, str | None, str]
+
+
+def _sources(cfg: Config, state: dict[str, Any], given: list[Source] | None) -> list[Source]:
+    return list(scope.changed_sources(cfg, state)) if given is None else given
+
+
+def uncovered(
+    cfg: Config, state: dict[str, Any], final: bool = False, sources: list[Source] | None = None
+) -> list[str]:
+    """Changed lines no test ran, from the project's coverage report; empty when not set up.
+
+    With ``final`` (at `sdd done`) the report must also be the one the last passing gate
+    left behind, so a report edited by hand afterwards does not count.
+    """
     if cfg.coverage_mode == "off" or not cfg.coverage_report:
         return []
+    seen = (state.get("gate") or {}).get("coverage")
+    if final and seen != report_digest(cfg):
+        return ["the coverage report is not the one the last passing gate wrote; run the gate"]
     report = cfg.root / cfg.coverage_report
     try:
         ensure_safe(cfg.root, report)
@@ -125,7 +175,7 @@ def uncovered(cfg: Config, state: dict[str, Any]) -> list[str]:
         return [f"the coverage report {cfg.coverage_report} is outside the project"]
     if not report.is_file():
         return [f"no coverage report at {cfg.coverage_report}; run the gate"]
-    sources = list(scope.changed_sources(cfg, state))
+    sources = _sources(cfg, state, sources)
     if not sources:
         return []
     if report.stat().st_mtime < max((cfg.root / p).stat().st_mtime for p, _b, _a in sources):
@@ -174,11 +224,26 @@ def _py_surface(source: str) -> set[str]:
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return set()
     found: set[str] = set()
+    typing_only = {
+        id(inner)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If) and _dotted(node.test).endswith("TYPE_CHECKING")
+        for child in node.body
+        for inner in ast.walk(child)
+    }
     for node in ast.walk(tree):
+        if id(node) in typing_only:
+            continue  # imported for annotations only: never runs
         if isinstance(node, ast.Import):
-            found.update(f"import {a.name.split('.')[0]}" for a in node.names)
+            found.update(
+                f"import {a.name.split('.')[0]}" for a in node.names if a.name not in PY_SAFE
+            )
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            found.add(f"import {node.module.split('.')[0]}")
+            names = {f"{node.module}.{alias.name}" for alias in node.names}
+            if node.module not in PY_SAFE and not names <= PY_SAFE:
+                found.add(f"import {node.module.split('.')[0]}")
+            for name in names & PY_CALLS:  # `from os import system` hides the full name
+                found.add(f"call {name}")
         elif isinstance(node, ast.Call):
             name = _dotted(node.func)
             if name in PY_CALLS:
@@ -203,11 +268,13 @@ def surface(path: str, source: str | None) -> set[str]:
 
 
 def _named(item: str, named: set[str]) -> bool:
-    token = item.split(" ", 1)[1]
-    return bool({token, token.split(".")[-1], token.split(".")[0]} & named)
+    token = item.split(" ", 1)[1].split(" ")[0]
+    return bool({token, token.split(".")[-1]} & named)
 
 
-def new_surface(cfg: Config, state: dict[str, Any]) -> list[str]:
+def new_surface(
+    cfg: Config, state: dict[str, Any], sources: list[Source] | None = None
+) -> list[str]:
     """New imports of, or calls to, processes, the network, files, `eval`: unless named."""
     if cfg.surface_mode == "off":
         return []
@@ -218,7 +285,7 @@ def new_surface(cfg: Config, state: dict[str, Any]) -> list[str]:
     ]
     named = scope.named_symbols(texts[0], texts[1])
     found: list[str] = []
-    for path, before, after in scope.changed_sources(cfg, state):
+    for path, before, after in _sources(cfg, state, sources):
         for item in sorted(surface(path, after) - surface(path, before)):
             if not _named(item, named):
                 found.append(f"{path}: new {item}")
@@ -248,12 +315,12 @@ def _sizes(source: str | None) -> dict[str, int]:
     return sizes
 
 
-def grown(cfg: Config, state: dict[str, Any]) -> list[str]:
+def grown(cfg: Config, state: dict[str, Any], sources: list[Source] | None = None) -> list[str]:
     """Functions that grew by more than the budget: a named function can still sprawl."""
     if cfg.growth_mode == "off" or cfg.max_growth < 1:
         return []
     found: list[str] = []
-    for path, before, after in scope.changed_sources(cfg, state):
+    for path, before, after in _sources(cfg, state, sources):
         if before is None or not path.endswith(".py"):
             continue
         old = _sizes(before)
@@ -266,30 +333,59 @@ def grown(cfg: Config, state: dict[str, Any]) -> list[str]:
 # --- findings ------------------------------------------------------------------------------
 
 
-def _checks(cfg: Config) -> list[tuple[str, str, Any]]:
+NO_BASE = (
+    "nothing to compare against: the run started in a repository with no commit, so changed "
+    "lines, new side effects and growth cannot be checked. Commit, then start the run again"
+)
+
+
+def _active(cfg: Config) -> bool:
+    coverage = cfg.coverage_mode != "off" and bool(cfg.coverage_report)
+    return coverage or cfg.surface_mode != "off" or cfg.growth_mode != "off"
+
+
+def _has_base(state: dict[str, Any]) -> bool:
+    return bool((state.get("scope") or {}).get("base"))
+
+
+def _checks(cfg: Config, final: bool) -> list[tuple[str, str, Any]]:
     return [
-        (cfg.coverage_mode, "uncovered change", uncovered),
+        (cfg.coverage_mode, "uncovered change", lambda c, s, src: uncovered(c, s, final, src)),
         (cfg.surface_mode, "new side effect", new_surface),
         (cfg.growth_mode, "large change", grown),
     ]
 
 
-def notes(cfg: Config, state: dict[str, Any]) -> list[str]:
+def notes(cfg: Config, state: dict[str, Any], final: bool = False) -> list[str]:
     """One line per finding, in warn and enforce mode, for `sdd check` and `sdd scope`."""
-    return [
+    if not _active(cfg):
+        return []
+    if not _has_base(state):
+        return [f"not checked: {NO_BASE}"]
+    sources = list(scope.changed_sources(cfg, state))  # read once for all three checks
+    lines = [
         f"{label}: {line}"
-        for mode, label, check in _checks(cfg)
+        for mode, label, check in _checks(cfg, final)
         if mode != "off"
-        for line in check(cfg, state)
+        for line in check(cfg, state, sources)
     ]
+    lines += [f"not checked: {path} is too large to read" for path in scope.too_large(cfg, state)]
+    return lines
 
 
 def problem(cfg: Config, state: dict[str, Any]) -> str | None:
     """Why `sdd done` must refuse (enforce mode only), or None."""
-    for mode, label, check in _checks(cfg):
+    modes = (cfg.surface_mode, cfg.growth_mode)
+    enforced = "enforce" in modes or (cfg.coverage_mode == "enforce" and cfg.coverage_report)
+    if not enforced:
+        return None
+    if not _has_base(state):
+        return NO_BASE
+    sources = list(scope.changed_sources(cfg, state))
+    for mode, label, check in _checks(cfg, True):
         if mode != "enforce":
             continue
-        found = check(cfg, state)
+        found = check(cfg, state, sources)
         if found:
             shown = "; ".join(found[:4]) + (f" and {len(found) - 4} more" if len(found) > 4 else "")
             return (

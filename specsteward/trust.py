@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from specsteward.config import CONFIG_FILE
+from specsteward.gitsafe import GIT
 
 STORE_NAME = "trust.json"
 T = TypeVar("T")
@@ -92,7 +93,7 @@ def repo_root(root: Path) -> Path:
     """
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            [*GIT, "rev-parse", "--path-format=absolute", "--git-common-dir"],
             cwd=root,
             capture_output=True,
             text=True,

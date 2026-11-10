@@ -17,6 +17,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from specsteward import gitsafe
 from specsteward.config import GRAPHIFY_VERSION as DEFAULT_VERSION
 from specsteward.remote import env_without_tokens
 from specsteward.safefs import ensure_safe
@@ -129,7 +130,11 @@ def install(version: str, run: Runner = _run) -> str | None:
 def _head(root: Path) -> str:
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=False
+            [*gitsafe.GIT, "rev-parse", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except OSError:
         return ""

@@ -221,7 +221,23 @@ def _models(raw: dict[str, Any]) -> dict[str, str]:
     return models
 
 
+TABLES: tuple[str, ...] = (
+    "project",
+    "limits",
+    "wording",
+    "groups",
+    "brief",
+    "graphify",
+    "scope",
+    "tdd",
+)
+TABLES += ("coverage", "format", "models", "review")
+
+
 def from_dict(root: Path, raw: dict[str, Any]) -> Config:
+    for name in TABLES:
+        if not isinstance(raw.get(name, {}), dict):
+            raise ValueError(f"[{name}] must be a table, for example `[{name}]` on its own line")
     project = raw.get("project", {})
     limits = Limits(**raw.get("limits", {}))
     counts = {k: v for k, v in vars(limits).items() if k != "max_tokens"}

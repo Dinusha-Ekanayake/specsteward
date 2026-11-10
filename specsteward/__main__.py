@@ -398,9 +398,10 @@ def _check(cfg: cfg_mod.Config, task: str | None) -> int:
     results = run_all(cfg)
     print(format_report(results))
     active = run_state.load(cfg.root)
-    if active is not None and active["active"] and cfg.scope_mode != "off":
-        for line in scope_mod.notes(cfg, active):
-            print(f"SCOPE: {line}")
+    if active is not None and active["active"]:
+        if cfg.scope_mode != "off":
+            for line in scope_mod.notes(cfg, active):
+                print(f"SCOPE: {line}")
         for line in drift.notes(cfg, active):
             print(f"DRIFT: {line}")
     if all(r.ok for r in results):
@@ -521,7 +522,7 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
             note = f"warning: unplanned change {name}; name it in the plan or revert"
             print(note, file=sys.stderr)
     if command == "done":
-        for line in drift.notes(cfg, state):
+        for line in drift.notes(cfg, state, final=True):
             print(f"warning: {line}", file=sys.stderr)
     print(json.dumps({k: state[k] for k in ("spec", "active", "halted", "agent_runs")}))
     return 0

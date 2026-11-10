@@ -16,7 +16,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, TypeVar
 
-from specsteward import drift, scope, trust, usage
+from specsteward import drift, gitsafe, scope, trust, usage
 from specsteward.config import CONFIG_FILE, SPEC_NUMBER, Config
 from specsteward.dashboard import write_dashboard
 from specsteward.graph import ensure_ignores
@@ -137,7 +137,9 @@ def tasks_path(root: Path, state: State) -> Path:
 def current_branch(root: Path) -> str:
     """The checked-out branch; `symbolic-ref` also works before the first commit."""
     for args in (["symbolic-ref", "--short", "HEAD"], ["rev-parse", "--abbrev-ref", "HEAD"]):
-        proc = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            [*gitsafe.GIT, *args], cwd=root, capture_output=True, text=True, check=False
+        )
         if proc.returncode == 0 and proc.stdout.strip():
             return proc.stdout.strip()
     raise ValueError("not a git repository")
@@ -216,7 +218,7 @@ def create_worktree(cfg: Config, spec: str) -> Path:
         raise ValueError(f"{target} already exists")
     exists = (
         subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+            [*gitsafe.GIT, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
             cwd=cfg.root,
             capture_output=True,
             check=False,
@@ -593,6 +595,7 @@ def record_pass(cfg: Config, before: str | None = None) -> State | None:
         raise ValueError("files changed while the gate ran; run `sdd check` again")
     _gate(state)["passed"] = now
     _gate(state)["passed_at"] = time.time()
+    _gate(state)["coverage"] = drift.report_digest(cfg)
     save(cfg.root, state)
     return state
 

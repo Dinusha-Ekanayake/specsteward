@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from specsteward import gitsafe
 from specsteward.config import Config
 from specsteward.safefs import ensure_safe
 from specsteward.worktree import _skipped
@@ -34,15 +35,10 @@ _PATHLIKE = re.compile(r"^[\w.\-/*?\[\]{}]+$")
 
 
 def _git(root: Path, *args: str) -> list[str] | None:
-    try:
-        proc = subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, check=False, text=True, encoding="utf-8"
-        )
-    except OSError:
+    raw = gitsafe.output(root, *args)
+    if raw is None:
         return None
-    if proc.returncode != 0:
-        return None
-    return [line for line in proc.stdout.split("\0") if line]
+    return [line for line in raw.decode("utf-8", "replace").split("\0") if line]
 
 
 def head(root: Path) -> str | None:
@@ -52,12 +48,15 @@ def head(root: Path) -> str | None:
 
 def _changed_now(root: Path, base: str | None) -> set[str]:
     tracked = (
-        _git(root, "diff", "--name-only", "--no-renames", "-z", base or "HEAD") if base else []
+        _git(root, "diff", "--name-only", "--relative", "--no-renames", "-z", base or "HEAD")
+        if base
+        else []
     )
     untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
     if tracked is None or untracked is None:
         return set()
-    return {path.replace("\\", "/") for path in (*tracked, *untracked)}
+    hidden = gitsafe.hidden_edits(root)  # edits git was told not to report
+    return {path.replace("\\", "/") for path in (*tracked, *untracked, *hidden)}
 
 
 BASE_DIR = Path(".sdd") / "scope-base"
@@ -91,7 +90,7 @@ def snapshot(root: Path) -> dict[str, Any]:
                 copy.write_bytes(source.read_bytes())
         except (OSError, ValueError):
             continue  # no copy: the symbol check skips this file
-    return {"base": base, "dirty": dirty}
+    return {"base": base, "dirty": dirty, "excludes": gitsafe.exclude_state(root)}
 
 
 def _touched(root: Path, start: dict[str, Any]) -> list[str]:
@@ -167,8 +166,24 @@ def out_of_scope(cfg: Config, state: dict[str, Any]) -> list[str]:
     )
 
 
+def hiding_problem(cfg: Config, state: dict[str, Any]) -> str | None:
+    """Git's own "ignore this" settings changed during the run: new files could be invisible
+    to the gate, the review and the scope checks. Checked in every mode."""
+    start = state.get("scope") or {}
+    if start.get("excludes") is None or start["excludes"] == gitsafe.exclude_state(cfg.root):
+        return None
+    return (
+        "git's exclude settings (.git/info/exclude or core.excludesFile) changed during this "
+        "run, so new files may be hidden from the checks. Undo the change, or stop the run "
+        "and start it again"
+    )
+
+
 def problem(cfg: Config, state: dict[str, Any]) -> str | None:
     """Why the tree is out of scope (enforce mode only), or None."""
+    hidden = hiding_problem(cfg, state)
+    if hidden:
+        return hidden
     if cfg.scope_mode != "enforce":
         return symbol_problem(cfg, state)
     extra = out_of_scope(cfg, state)
@@ -256,7 +271,9 @@ def _start_text(root: Path, start: dict[str, Any], path: str) -> str | None:
     if path in start.get("dirty", {}):
         copy = root / BASE_DIR / path
         try:
-            return copy.read_text(encoding="utf-8", errors="replace") if copy.is_file() else None
+            if not copy.is_file():
+                return None
+            return copy.read_text(encoding="utf-8-sig", errors="replace")
         except OSError:
             return None
     return _text_at(root, str(start["base"]), path)
@@ -265,17 +282,32 @@ def _start_text(root: Path, start: dict[str, Any], path: str) -> str | None:
 def _text_at(root: Path, base: str, path: str) -> str | None:
     try:
         proc = subprocess.run(
-            ["git", "show", f"{base}:{path}"],
+            [*gitsafe.GIT, "show", f"{base}:./{path}"],  # `./`: relative to the project
             cwd=root,
             capture_output=True,
             check=False,
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=gitsafe.git_env(),
         )
     except OSError:
         return None
-    return proc.stdout if proc.returncode == 0 else None
+    return proc.stdout.removeprefix("\ufeff") if proc.returncode == 0 else None
+
+
+def _renames(root: Path, base: str) -> dict[str, str]:
+    """New path -> old path for files git sees as moved since ``base``."""
+    found = _git(root, "diff", "--name-status", "--relative", "-M", "-z", base) or []
+    moved: dict[str, str] = {}
+    index = 0
+    while index < len(found):
+        if found[index].startswith(("R", "C")) and index + 2 < len(found):
+            moved[found[index + 2].replace("\\", "/")] = found[index + 1].replace("\\", "/")
+            index += 3
+        else:
+            index += 2
+    return moved
 
 
 def unplanned_symbols(cfg: Config, state: dict[str, Any]) -> list[str]:
@@ -350,22 +382,49 @@ def changed_sources(cfg: Config, state: dict[str, Any]) -> Iterator[tuple[str, s
     start = state.get("scope") or {}
     if not start.get("base"):
         return
-    spec_dir = f"{state['spec_dir']}/"
-    for path in _touched(cfg.root, start):
+    moved = _renames(cfg.root, str(start["base"]))
+    for path in _source_paths(cfg, state):
         file = cfg.root / path
-        if _ignored(path) or path.startswith(spec_dir) or not file.is_file():
-            continue
-        if any(_matches(path, pattern) for pattern in DEFAULT_ALLOW):
-            continue
         try:
-            after = file.read_text(encoding="utf-8", errors="replace")
+            if file.stat().st_size > MAX_COPY_BYTES:
+                continue  # generated or binary: `too_large` reports it
+            after = file.read_text(encoding="utf-8-sig", errors="replace")
         except OSError:
             continue
-        yield path, _start_text(cfg.root, start, path), after
+        before = _start_text(cfg.root, start, path)
+        if before is None and path in moved:  # a moved file is not a new one
+            before = _start_text(cfg.root, start, moved[path])
+        yield path, before, after
+
+
+def _source_paths(cfg: Config, state: dict[str, Any]) -> list[str]:
+    spec_dir = f"{state['spec_dir']}/"
+    return [
+        path
+        for path in _touched(cfg.root, state.get("scope") or {})
+        if not _ignored(path)
+        and not path.startswith(spec_dir)
+        and (cfg.root / path).is_file()
+        and not any(_matches(path, pattern) for pattern in DEFAULT_ALLOW)
+    ]
+
+
+def too_large(cfg: Config, state: dict[str, Any]) -> list[str]:
+    """Changed source files too big to be read line by line, so nothing checks inside them."""
+    found = []
+    for path in _source_paths(cfg, state):
+        try:
+            if (cfg.root / path).stat().st_size > MAX_COPY_BYTES:
+                found.append(path)
+        except OSError:
+            continue
+    return found
 
 
 def notes(cfg: Config, state: dict[str, Any]) -> list[str]:
     """One line per finding, for `sdd check` and `sdd scope`; empty when all is inside."""
-    lines = [f"outside the plan: {path}" for path in out_of_scope(cfg, state)]
+    hidden = hiding_problem(cfg, state)
+    lines = [hidden] if hidden else []
+    lines += [f"outside the plan: {path}" for path in out_of_scope(cfg, state)]
     lines += [f"unplanned symbol: {name}" for name in unplanned_symbols(cfg, state)]
     return lines

@@ -13,8 +13,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from specsteward import gitsafe, trust
 from specsteward import state as run_state
-from specsteward import trust
 from specsteward.config import CONFIG_FILE, CheckStep, Config, Wording
 from specsteward.remote import env_without_tokens
 
@@ -43,7 +43,7 @@ def _committed(root: Path, rel: str) -> bool:
     """True when git tracks ``rel``: a real virtual environment is never committed."""
     try:
         inside = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+            [*gitsafe.GIT, "rev-parse", "--is-inside-work-tree"],
             cwd=root,
             capture_output=True,
             check=False,
@@ -51,7 +51,7 @@ def _committed(root: Path, rel: str) -> bool:
         if inside.returncode != 0:
             return False  # not a repository: nothing is tracked
         proc = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "--", rel],
+            [*gitsafe.GIT, "ls-files", "--error-unmatch", "--", rel],
             cwd=root,
             capture_output=True,
             check=False,
