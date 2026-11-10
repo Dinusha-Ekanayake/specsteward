@@ -109,6 +109,7 @@ def test_new_side_effects_in_a_planned_file_are_found_unless_named(repo: Path) -
     assert drift.new_surface(cfg, run) == [
         "src/mod.py: new call eval",
         "src/mod.py: new call open (for writing)",
+        "src/mod.py: new call subprocess.run",
         "src/mod.py: new import subprocess",
     ]
     plan = repo / "specs" / "009-demo" / "plan.md"
@@ -124,7 +125,7 @@ def test_side_effects_that_were_already_there_are_not_new(repo: Path) -> None:
 
 def test_javascript_side_effects_are_found() -> None:
     source = "const cp = require('node:child_process');\nimport fs from 'fs';\neval(x);\n"
-    assert drift.surface("a.js", source) == {"import child_process", "import fs", "call eval"}
+    assert set(drift.surface("a.js", source)) == {"import child_process", "import fs", "call eval"}
 
 
 def test_a_function_that_grew_past_the_budget_is_found(repo: Path) -> None:
@@ -180,8 +181,10 @@ def test_a_report_edited_after_the_passing_gate_does_not_count(repo: Path) -> No
 
 def test_an_imported_name_does_not_hide_the_call() -> None:
     found = drift.surface("a.py", "from os import system\nfrom shutil import rmtree\n")
-    assert found == {"call os.system", "call shutil.rmtree"}
-    assert drift.surface("a.py", "from . import os\nimport json\n") == set()
+    assert set(found) == {"call os.system", "call shutil.rmtree"}
+    assert not drift.surface("a.py", "from . import os\nimport json\n")
+    aliased = "import os as o\nfrom os import system as run\no.system('a')\nrun('b')\n"
+    assert drift.surface("a.py", aliased)["call os.system"] == 3  # the import and both calls
 
 
 def test_naming_a_module_does_not_waive_its_dangerous_calls() -> None:
@@ -274,8 +277,8 @@ def test_text_helpers_and_typing_imports_are_not_side_effects() -> None:
         "from urllib.parse import quote\nfrom http import HTTPStatus\nimport urllib.parse\n"
         "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import subprocess\n"
     )
-    assert drift.surface("a.py", source) == set()
-    assert drift.surface("a.py", "from urllib.request import urlopen\n") == {"import urllib"}
+    assert not drift.surface("a.py", source)
+    assert set(drift.surface("a.py", "from urllib.request import urlopen\n")) == {"import urllib"}
 
 
 def test_a_run_with_no_commit_to_compare_against_says_so(repo: Path) -> None:

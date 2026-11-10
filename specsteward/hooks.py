@@ -71,6 +71,14 @@ GUARD_REASON = (
 CLAUDE_SETTINGS = (Path(".claude") / "settings.json", Path(".claude") / "settings.local.json")
 
 
+def _git_dir(root: Path) -> Path | None:
+    """The `.git` folder of the repository ``root`` is in (the project may be a subfolder)."""
+    for folder in (root, *root.parents):
+        if (folder / ".git").is_dir():
+            return folder / ".git"
+    return None
+
+
 def _edited_path(payload: dict[str, Any]) -> str:
     tool_input = payload.get("tool_input") or {}
     return str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
@@ -131,8 +139,13 @@ def guard_decision(cfg: Config, payload: dict[str, Any]) -> dict[str, Any] | Non
     if not path.is_absolute():
         path = Path(str(payload.get("cwd") or cfg.root)) / path
     path = path.resolve()
-    directories = (cfg.root / SHIM.parent.parent, trust.store_path().parent)
-    files = tuple(cfg.root / rel for rel in CLAUDE_SETTINGS)
+    directories: tuple[Path, ...] = (cfg.root / SHIM.parent.parent, trust.store_path().parent)
+    files: tuple[Path, ...] = tuple(cfg.root / rel for rel in CLAUDE_SETTINGS)
+    git_dir = _git_dir(cfg.root)
+    if git_dir is not None:
+        # git settings that run a program (fsmonitor, hooks) or hide files from the gate
+        directories += (git_dir / "hooks", git_dir / "info")
+        files += (git_dir / "config",)
     if not _protected(path, directories, files):
         return _access_list_decision(path, raw)
     return {

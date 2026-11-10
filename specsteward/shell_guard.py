@@ -82,9 +82,18 @@ PROTECTED = re.compile(
     r"|\.claude[/\\]specsteward"  # trust store, approvals, encrypted token
     r"|\.claude[/\\]settings(?:\.local)?\.json"  # the permission rules that make the gates
     r"|\.claude[/\\]channels[/\\][^/\\\s]+[/\\]access\.json"  # who may answer from the phone
-    r"|/proc/[^\s]*/environ",  # the process environment, token included
+    r"|/proc/[^\s]*/environ"  # the process environment, token included
+    r"|\.git[/\\](?:config|hooks|info)\b",  # settings that run programs or hide files
     re.IGNORECASE,
 )
+# Git settings that run a program inside git, or change which files git reports.
+GIT_RISKY_KEY = re.compile(
+    r"fsmonitor|excludesfile|hookspath|sshcommand|core\.editor|core\.pager|\balias\."
+    r"|\bfilter\.|textconv|diff\.external|credential\.|askpass|core\.worktree|includeif|include\.",
+    re.IGNORECASE,
+)
+GIT_HIDE_FLAGS = frozenset(("--assume-unchanged", "--skip-worktree"))
+HIDES_CHANGES = "this git command can hide changes from the gate or run a program inside git"
 SECRET = re.compile(
     r"\.claude[/\\]channels[/\\][^/\\\s]+[/\\]\.env|\.claude[/\\]specsteward[/\\]secrets"
     r"|\b(?:TELEGRAM|DISCORD)_BOT_TOKEN\b|/proc/[^\s]*/environ",
@@ -241,6 +250,18 @@ def _nested(words: list[str]) -> str:
     return ""
 
 
+def _git_hides(words: list[str]) -> bool:
+    """`git update-index --assume-unchanged`, or `git config` writing a setting that runs a
+    program or changes what git reports. Reading a setting (`--get`, `--list`) is fine."""
+    rest = [word.lower() for word in words[1:]]
+    if "update-index" in rest and GIT_HIDE_FLAGS & set(rest):
+        return True
+    if "config" not in rest:
+        return False
+    reads = {"--get", "--get-all", "--get-regexp", "--list", "-l"} & set(rest)
+    return not reads and any(GIT_RISKY_KEY.search(word) for word in rest)
+
+
 GATE_TEXT = re.compile(r"sdd\W.*\b(?:approve|trust|start|resume|signoff)\b", re.IGNORECASE)
 CHANGES_STATE = "this command may change run state, the trust store or the permission rules"
 
@@ -281,6 +302,8 @@ def _reason(command: str) -> str:
         dumps = name in ENV_DUMPS or words[:2] == ["export", "-p"]
         if dumps and len(words) <= 2 and tokens & os.environ.keys():
             return "this session holds the phone bot token; listing the environment shows it"
+        if name == "git" and _git_hides(words):
+            return HIDES_CHANGES
         if name in CD and _protected(" ".join(words[1:])):
             in_protected = True
         redirects = REDIRECT_INTO.findall(segment)

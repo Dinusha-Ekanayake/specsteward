@@ -409,6 +409,33 @@ def _source_paths(cfg: Config, state: dict[str, Any]) -> list[str]:
     ]
 
 
+TEST_FOLDERS = frozenset(("tests", "test", "__tests__", "spec", "specs", "e2e", "testing"))
+
+
+def stray_tests(cfg: Config, state: dict[str, Any]) -> Iterator[tuple[str, str | None, str]]:
+    """Changed files named like tests (`helper_test.py`) that are not in a test folder. The
+    allow-list lets them through unplanned, so the side-effect check still reads them."""
+    start = state.get("scope") or {}
+    if not start.get("base"):
+        return
+    spec_dir = f"{state['spec_dir']}/"
+    for path in _touched(cfg.root, start):
+        file = cfg.root / path
+        if _ignored(path) or path.startswith(spec_dir) or not file.is_file():
+            continue
+        if TEST_FOLDERS & set(path.split("/")[:-1]):
+            continue
+        if not any(_matches(path, pattern) for pattern in DEFAULT_ALLOW):
+            continue
+        try:
+            if file.stat().st_size > MAX_COPY_BYTES:
+                continue
+            after = file.read_text(encoding="utf-8-sig", errors="replace")
+        except OSError:
+            continue
+        yield path, _start_text(cfg.root, start, path), after
+
+
 def too_large(cfg: Config, state: dict[str, Any]) -> list[str]:
     """Changed source files too big to be read line by line, so nothing checks inside them."""
     found = []

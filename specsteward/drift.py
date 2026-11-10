@@ -16,6 +16,7 @@ import difflib
 import hashlib
 import re
 import xml.etree.ElementTree as ET  # nosec B405 - reads the project's own coverage report
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,7 @@ from specsteward.safefs import ensure_safe
 
 MAX_REPORT_BYTES = 20_000_000
 MAX_DIFF_LINES = 20_000  # beyond this every line counts as changed; difflib is quadratic
-CODE_SUFFIXES = (".py", ".js", ".jsx", ".ts", ".tsx", ".mjs")
+CODE_SUFFIXES = (".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts")
 
 PY_MODULES = frozenset(
     ("subprocess", "socket", "urllib", "http", "requests", "httpx", "aiohttp", "ctypes")
@@ -34,15 +35,24 @@ PY_MODULES = frozenset(
 )
 PY_CALLS = frozenset(
     ("os.system", "os.popen", "os.remove", "os.unlink", "os.rmdir", "os.removedirs")
-    + ("os.execv", "os.execvp", "os.kill", "shutil.rmtree", "eval", "exec", "__import__")
+    + ("os.kill", "os.startfile", "os.open", "os.rename", "os.replace", "os.chmod")
+    + ("shutil.rmtree", "shutil.move", "shutil.copy", "shutil.copy2", "shutil.copyfile")
+    + ("shutil.copytree", "eval", "exec", "compile", "__import__")
+    + ("builtins.eval", "builtins.exec", "builtins.compile", "builtins.__import__")
 )
+PY_CALL_PREFIXES = ("os.exec", "os.spawn", "os.posix_spawn")
+PY_WRITE_METHODS = frozenset(("write_text", "write_bytes", "unlink", "rmtree", "rmdir"))
 # Parts of a watched package that only handle text or constants.
 PY_SAFE = frozenset(("urllib.parse", "urllib.error", "http.cookies", "http.HTTPStatus"))
 PY_SAFE |= frozenset(("http.HTTPMethod", "importlib.metadata", "importlib.resources"))
-JS_MODULES = "child_process|fs|net|http|https|dgram|vm|worker_threads|cluster"
+JS_MODULES = "child_process|fs/promises|fs|net|http|https|dgram|vm|worker_threads|cluster"
 JS_REQUIRE = re.compile(rf"""require\(\s*['"](?:node:)?({JS_MODULES})['"]\s*\)""")
 JS_IMPORT = re.compile(rf"""from\s+['"](?:node:)?({JS_MODULES})['"]""")
-JS_CALLS = re.compile(r"\b(eval)\s*\(|\bnew\s+(Function)\s*\(")
+JS_DYNAMIC = re.compile(rf"""import\(\s*['"](?:node:)?({JS_MODULES})['"]\s*\)""")
+JS_CALLS = re.compile(
+    r"\b(eval|fetch|Bun\.spawn|Deno\.run|Deno\.Command|new Function|new WebSocket"
+    r"|new XMLHttpRequest)\s*\("
+)
 
 
 # --- changed lines -------------------------------------------------------------------------
@@ -178,11 +188,12 @@ def uncovered(
     sources = _sources(cfg, state, sources)
     if not sources:
         return []
-    if report.stat().st_mtime < max((cfg.root / p).stat().st_mtime for p, _b, _a in sources):
-        return ["the coverage report is older than the changes; run the gate again"]
     try:
+        newest = max(_mtime(cfg.root / p) for p, _b, _a in sources)
+        if report.stat().st_mtime < newest:
+            return ["the coverage report is older than the changes; run the gate again"]
         covered = read_coverage(report)
-    except (OSError, ValueError, ET.ParseError):
+    except (OSError, ValueError, OverflowError, ET.ParseError):
         return [f"the coverage report {cfg.coverage_report} cannot be read"]
     found: list[str] = []
     for path, before, after in sources:
@@ -191,10 +202,37 @@ def uncovered(
             if path.endswith(CODE_SUFFIXES):
                 found.append(f"{path} is not in the coverage report (no test loads it)")
             continue
-        bad = sorted(n for n in added_lines(before, after) if lines.get(n, 1) == 0)
+        changed = added_lines(before, after)
+        bad = sorted(n for n in changed if lines.get(n, 1) == 0)
         if bad:
             found.append(f"{path}: lines {_ranges(bad)} changed but no test runs them")
+        elif _code_lines(after, changed) >= MIN_UNMEASURED and not changed & lines.keys():
+            # the file is listed, yet not one changed line is: not the report of this code
+            found.append(f"{path}: the report measures none of the changed lines")
     return found
+
+
+MIN_UNMEASURED = 5
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0  # deleted since it was listed
+
+
+def _code_lines(text: str, numbers: set[int]) -> int:
+    """How many of these lines hold code rather than blanks or comments."""
+    lines = _lines(text)
+    comment = ("#", "//", "/*", "*", '"""', "'''")
+    return sum(
+        1
+        for n in numbers
+        if 0 < n <= len(lines)
+        and lines[n - 1].strip()
+        and not lines[n - 1].lstrip().startswith(comment)
+    )
 
 
 # --- side-effect surface -------------------------------------------------------------------
@@ -211,19 +249,65 @@ def _dotted(node: ast.expr) -> str:
 
 
 def _opens_for_writing(call: ast.Call) -> bool:
+    """A write mode, or a mode that is not a literal and so cannot be read here."""
     values = [*call.args[1:2], *(k.value for k in call.keywords if k.arg == "mode")]
     return any(
-        isinstance(v, ast.Constant) and isinstance(v.value, str) and set(v.value) & set("wax+")
+        not isinstance(v, ast.Constant)
+        or (isinstance(v.value, str) and bool(set(v.value) & set("wax+")))
         for v in values
     )
 
 
-def _py_surface(source: str) -> set[str]:
+def _aliases(tree: ast.AST, skip: set[int]) -> dict[str, str]:
+    """Local name -> what it really is (`import os as o`, `from os import system as run`)."""
+    names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if id(node) in skip:
+            continue
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names[alias.asname or alias.name.split(".")[0]] = (
+                    alias.name if alias.asname else alias.name.split(".")[0]
+                )
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                names[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return names
+
+
+def _resolve(name: str, aliases: dict[str, str]) -> str:
+    head, _, rest = name.partition(".")
+    real = aliases.get(head, head)
+    return f"{real}.{rest}" if rest else real
+
+
+def _safe(name: str) -> bool:
+    return any(name == safe or name.startswith(safe + ".") for safe in PY_SAFE)
+
+
+def _call_item(node: ast.Call, aliases: dict[str, str]) -> str | None:
+    name = _resolve(_dotted(node.func), aliases)
+    if name in PY_CALLS or name.startswith(PY_CALL_PREFIXES):
+        return f"call {name}"
+    if name in ("open", "io.open", "builtins.open"):
+        return "call open (for writing)" if _opens_for_writing(node) else None
+    if name == "getattr" and node.args:
+        target = _resolve(_dotted(node.args[0]), aliases).split(".")[0]
+        if target in PY_MODULES or target in ("os", "shutil", "builtins", "sys"):
+            return f"call getattr (on {target})"
+    if name.split(".")[0] in PY_MODULES and not _safe(name):
+        return f"call {name}"
+    if isinstance(node.func, ast.Attribute) and node.func.attr in PY_WRITE_METHODS:
+        return f"call .{node.func.attr}"
+    return None
+
+
+def _py_surface(source: str) -> Counter[str]:
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
-        return set()
-    found: set[str] = set()
+        return Counter()
+    found: Counter[str] = Counter()
     typing_only = {
         id(inner)
         for node in ast.walk(tree)
@@ -231,72 +315,96 @@ def _py_surface(source: str) -> set[str]:
         for child in node.body
         for inner in ast.walk(child)
     }
+    aliases = _aliases(tree, typing_only)
     for node in ast.walk(tree):
         if id(node) in typing_only:
             continue  # imported for annotations only: never runs
         if isinstance(node, ast.Import):
-            found.update(
-                f"import {a.name.split('.')[0]}" for a in node.names if a.name not in PY_SAFE
-            )
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in PY_MODULES and not _safe(alias.name):
+                    found[f"import {root}"] += 1
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             names = {f"{node.module}.{alias.name}" for alias in node.names}
-            if node.module not in PY_SAFE and not names <= PY_SAFE:
-                found.add(f"import {node.module.split('.')[0]}")
-            for name in names & PY_CALLS:  # `from os import system` hides the full name
-                found.add(f"call {name}")
+            root = node.module.split(".")[0]
+            if root in PY_MODULES and not _safe(node.module) and not all(map(_safe, names)):
+                found[f"import {root}"] += 1
+            for name in names:  # `from os import system` hides the call's full name
+                if name in PY_CALLS or name.startswith(PY_CALL_PREFIXES):
+                    found[f"call {name}"] += 1
         elif isinstance(node, ast.Call):
-            name = _dotted(node.func)
-            if name in PY_CALLS:
-                found.add(f"call {name}")
-            elif name == "open" and _opens_for_writing(node):
-                found.add("call open (for writing)")
-    return {item for item in found if not item.startswith("import ") or item[7:] in PY_MODULES}
-
-
-def _js_surface(source: str) -> set[str]:
-    found = {f"import {m}" for m in (*JS_REQUIRE.findall(source), *JS_IMPORT.findall(source))}
-    found.update(f"call {a or b}" for a, b in JS_CALLS.findall(source))
+            item = _call_item(node, aliases)
+            if item:
+                found[item] += 1
     return found
 
 
-def surface(path: str, source: str | None) -> set[str]:
+def _js_surface(source: str) -> Counter[str]:
+    found: Counter[str] = Counter()
+    for pattern in (JS_REQUIRE, JS_IMPORT, JS_DYNAMIC):
+        found.update(f"import {name}" for name in pattern.findall(source))
+    found.update(f"call {name}" for name in JS_CALLS.findall(source))
+    return found
+
+
+def surface(path: str, source: str | None) -> Counter[str]:
+    """What the file reaches out with, and how often: imports of, and calls to, processes,
+    the network, the filesystem and code evaluation. A list of known names, not a proof."""
     if source is None:
-        return set()
+        return Counter()
     if path.endswith(".py"):
         return _py_surface(source)
-    return _js_surface(source) if path.endswith(CODE_SUFFIXES) else set()
+    return _js_surface(source) if path.endswith(CODE_SUFFIXES) else Counter()
 
 
 def _named(item: str, named: set[str]) -> bool:
-    token = item.split(" ", 1)[1].split(" ")[0]
-    return bool({token, token.split(".")[-1]} & named)
+    """The plan or the tasks name this item: the call (`os.system`, `system`), or for a
+    watched package its own name (`subprocess` covers `subprocess.run`). Naming `os` does
+    not cover `os.system`."""
+    token = item.split(" ", 1)[1].split(" ")[0].lstrip(".")
+    root = token.split(".")[0]
+    return bool({token, token.split(".")[-1]} & named) or (root in PY_MODULES and root in named)
 
 
-def new_surface(
-    cfg: Config, state: dict[str, Any], sources: list[Source] | None = None
-) -> list[str]:
-    """New imports of, or calls to, processes, the network, files, `eval`: unless named."""
-    if cfg.surface_mode == "off":
-        return []
+def _plan_names(cfg: Config, state: dict[str, Any]) -> set[str]:
     spec_dir = cfg.root / str(state["spec_dir"])
     texts = [
         (spec_dir / name).read_text(encoding="utf-8") if (spec_dir / name).exists() else ""
         for name in ("plan.md", "tasks.md")
     ]
-    named = scope.named_symbols(texts[0], texts[1])
+    return scope.named_symbols(texts[0], texts[1])
+
+
+def new_surface(
+    cfg: Config, state: dict[str, Any], sources: list[Source] | None = None
+) -> list[str]:
+    """New imports of, or calls to, processes, the network, files, `eval`: unless named.
+
+    Counted, so one more `os.system` in a file that already had one is still new. Files
+    named like tests but kept outside a test folder are checked too: they are code a planned
+    file could import.
+    """
+    if cfg.surface_mode == "off":
+        return []
+    named = _plan_names(cfg, state)
     found: list[str] = []
-    for path, before, after in _sources(cfg, state, sources):
-        for item in sorted(surface(path, after) - surface(path, before)):
-            if not _named(item, named):
-                found.append(f"{path}: new {item}")
+    for path, before, after in (*_sources(cfg, state, sources), *scope.stray_tests(cfg, state)):
+        was = surface(path, before)
+        for item, count in sorted(surface(path, after).items()):
+            extra = count - was.get(item, 0)
+            if extra > 0 and not _named(item, named):
+                found.append(f"{path}: new {item}" + (f" (x{extra})" if extra > 1 else ""))
     return found
 
 
 # --- growth budget -------------------------------------------------------------------------
 
+NEW_FUNCTION_FACTOR = 3  # a new, unnamed function may be this many budgets before it is listed
+
 
 def _sizes(source: str | None) -> dict[str, int]:
-    """Syntax-tree nodes per function and method, by qualified name."""
+    """Syntax-tree nodes per function and method (nested classes included), by qualified
+    name. A function defined inside another one counts toward its parent."""
     if source is None:
         return {}
     try:
@@ -305,28 +413,37 @@ def _sizes(source: str | None) -> dict[str, int]:
         return {}
     funcs = (ast.FunctionDef, ast.AsyncFunctionDef)
     sizes: dict[str, int] = {}
-    for node in tree.body:
-        if isinstance(node, funcs):
-            sizes[node.name] = sum(1 for _ in ast.walk(node))
-        elif isinstance(node, ast.ClassDef):
-            for item in node.body:
-                if isinstance(item, funcs):
-                    sizes[f"{node.name}.{item.name}"] = sum(1 for _ in ast.walk(item))
+
+    def visit(body: list[ast.stmt], prefix: str) -> None:
+        for node in body:
+            if isinstance(node, funcs):
+                sizes[prefix + node.name] = sum(1 for _ in ast.walk(node))
+            elif isinstance(node, ast.ClassDef):
+                visit(node.body, f"{prefix}{node.name}.")
+
+    visit(tree.body, "")
     return sizes
 
 
 def grown(cfg: Config, state: dict[str, Any], sources: list[Source] | None = None) -> list[str]:
-    """Functions that grew by more than the budget: a named function can still sprawl."""
+    """Functions that grew by more than the budget, and large new functions the plan does
+    not name (a private helper is where unplanned behaviour would otherwise hide)."""
     if cfg.growth_mode == "off" or cfg.max_growth < 1:
         return []
+    named = _plan_names(cfg, state)
     found: list[str] = []
     for path, before, after in _sources(cfg, state, sources):
         if before is None or not path.endswith(".py"):
-            continue
+            continue  # a new file: the plan names the file itself
         old = _sizes(before)
         for name, size in _sizes(after).items():
-            if name in old and size - old[name] > cfg.max_growth:
-                found.append(f"{path}::{name} grew by {size - old[name]} nodes")
+            if name in old:
+                if size - old[name] > cfg.max_growth:
+                    found.append(f"{path}::{name} grew by {size - old[name]} nodes")
+            elif size > cfg.max_growth * NEW_FUNCTION_FACTOR and not (
+                {name, name.split(".")[-1]} & named
+            ):
+                found.append(f"{path}::{name} is new, unnamed in the plan, and {size} nodes")
     return found
 
 
