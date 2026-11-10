@@ -10,6 +10,7 @@ from typing import NoReturn
 
 from specsteward import config as cfg_mod
 from specsteward import graph, phone, prereqs, trust, wizard
+from specsteward import scope as scope_mod
 from specsteward import state as run_state
 from specsteward.analyze import analyze
 from specsteward.analyze import format_findings as format_analysis
@@ -107,6 +108,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ("agent", "count a subagent run"),
             ("brief", "write .sdd/briefs/<first-id>.md"),
             ("check", "run the quality gate"),
+            ("scope", "list changes outside the files the approved plan names"),
             ("review", "record the reviewer's verdict for the group"),
             ("done", "tick a task (needs a passing gate and review)"),
             ("assume", "log an assumption the implementer made"),
@@ -193,6 +195,7 @@ def _parser() -> argparse.ArgumentParser:
     agent = sub.add_parser("agent", help=_help("agent"))
     agent.add_argument("role", choices=("planner", "implementer", "reviewer", "converger", "clerk"))
     agent.add_argument("--fresh", action="store_true")
+    sub.add_parser("scope", help=_help("scope"))
     review = sub.add_parser("review", help=_help("review"))
     review.add_argument("task")
     review.add_argument("verdict", choices=("clean", "changes"))
@@ -444,6 +447,11 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         trust.record_guard(root, cfg.guard)
         print("gate config files re-baselined")
         return 0
+    if command == "scope":
+        run = run_state.require(root)
+        extra = scope_mod.out_of_scope(cfg, run)
+        print("\n".join(extra) if extra else "all changes are inside the approved plan")
+        return 1 if extra and cfg.scope_mode == "enforce" else 0
     if command == "remote":
         print(json.dumps(remote_status(), indent=2))
         return 0

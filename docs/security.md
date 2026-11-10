@@ -10,6 +10,7 @@
 - Runs the commands in `sdd.toml` (`[[check]]`, `[format]`) from the repository root, **only after you have trusted that exact file** with `sdd trust`.
 - Edits files in your project through Claude Code's normal tools and permissions.
 - Ships its hooks with the plugin (`hooks/hooks.json`), so they run in every project that has an `sdd.toml` and do nothing elsewhere. `/specsteward:init` removes the project-level copies that 0.3.2 and 0.3.3 wrote, and never touches other hooks.
+- Keeps a run inside its approved plan: `sdd done` refuses while files outside the plan's `Modules / files` (plus tests) have changed. Widening the scope edits the plan, which breaks the approval hash and needs the user's approval again. The check is by file, not by behaviour: a change inside a planned file can still drift, which the reviewer and the final converge pass look for.
 - Writes `.sdd/` (git-ignored), merges permission rules into `.claude/settings.json`, and keeps a trust store in `~/.claude/specsteward/trust.json` (or `$SDD_HOME`).
 - With `[graphify] auto = true` (the default) and a **trusted** `sdd.toml`, installs a pinned version of the `graphifyy` package with `uv tool`, `pipx` or `pip --user` (run from your home directory, in isolated mode), and builds a local code graph in `graphify-out/`. Set `auto = false` to turn this off.
 

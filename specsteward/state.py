@@ -16,7 +16,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, TypeVar
 
-from specsteward import trust, usage
+from specsteward import scope, trust, usage
 from specsteward.config import SPEC_NUMBER, Config
 from specsteward.dashboard import write_dashboard
 from specsteward.graph import ensure_ignores
@@ -356,6 +356,7 @@ def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
         "started_at": datetime.now(UTC).isoformat(),
         "usage": usage.empty(),
         "gate": _fresh_gate([]),
+        "scope": scope.snapshot(cfg.root),
         "tasks": {},
     }
     save(cfg.root, state)
@@ -640,7 +641,7 @@ def done_problem(cfg: Config, state: State, task_id: str, risk: str = "high") ->
         return "no passing `sdd check` for the code as it is now; run the gate again"
     if risk not in cfg.review_skip and gate["reviewed"] != now:
         return "no clean review for the code as it is now; review it (again) first"
-    return None
+    return scope.problem(cfg, state)
 
 
 @locked

@@ -23,6 +23,7 @@ MEMBERS = {
         "agent",
         "brief",
         "check",
+        "scope",
         "review",
         "done",
         "assume",
@@ -34,6 +35,7 @@ MEMBERS = {
 FROZEN_HELP = {
     "init": "set up sdd.toml, templates and permissions",
     "check": "run the quality gate",
+    "scope": "list changes outside the files the approved plan names",
     "brief": "write .sdd/briefs/<first-id>.md",
     "start": "start a run for an approved spec",
     "approve": "mark a spec approved (keep behind an ask rule)",

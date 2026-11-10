@@ -99,6 +99,8 @@ class Config:
     review_skip: tuple[str, ...] = ()  # risks reviewed only by the final branch review
     graphify_auto: bool = True  # keep a code graph built and fresh, in the background
     graphify_version: str = GRAPHIFY_VERSION
+    scope_mode: str = "enforce"  # enforce | warn | off: changes outside the plan's files
+    scope_allow: tuple[str, ...] = ()  # extra globs a run may always touch
 
     def spec_dir(self, spec: str) -> Path:
         if not SPEC_NUMBER.fullmatch(spec):
@@ -183,6 +185,10 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
     groups = raw.get("groups", {})
     brief = raw.get("brief", {})
     graph = raw.get("graphify", {})
+    scope = raw.get("scope", {})
+    scope_mode = str(scope.get("mode", "enforce"))
+    if scope_mode not in ("enforce", "warn", "off"):
+        raise ValueError("[scope] mode must be 'enforce', 'warn' or 'off'")
     status_regex = str(project.get("status_regex", Config.status_regex))
     _regex(status_regex, "[project] status_regex")
     if re.compile(status_regex).groups < 2:
@@ -219,6 +225,8 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
         graphify_auto=bool(graph.get("auto", True)),
         graphify_version=str(graph.get("version", GRAPHIFY_VERSION)),
         review_skip=_review_skip(raw.get("review", {})),
+        scope_mode=scope_mode,
+        scope_allow=_tuple(scope.get("allow")),
     )
 
 
