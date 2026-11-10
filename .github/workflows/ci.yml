@@ -48,10 +48,11 @@ jobs:
           for groups in hooks.values():
               for group in groups:
                   for hook in group["hooks"]:
-                      script = hook["args"][0].replace("${CLAUDE_PLUGIN_ROOT}/", "")
+                      script = "scripts/hooks/" + hook["command"].rsplit(" ", 1)[1] + ".sh"
                       assert pathlib.Path(script).is_file(), f"missing hook script: {script}"
           PY
           for f in scripts/hooks/*.sh; do bash -n "$f"; done
+          sh -n scripts/hooks/run.cmd  # the runner is also a POSIX script
           test -z "$(git ls-files -s scripts | grep '\.sh$' | grep -v '^100755')"  # executable in git
           test -x scripts/sdd.sh
           bash -n scripts/sdd.sh

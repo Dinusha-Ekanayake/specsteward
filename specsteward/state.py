@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, date, datetime
 from functools import wraps
 from pathlib import Path
@@ -392,7 +392,7 @@ def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
 
 def _fresh_gate(group: list[str]) -> dict[str, Any]:
     """Which group is in flight, and the tree fingerprints its gate and review last saw."""
-    return {"group": group, "passed": None, "reviewed": None}
+    return {"group": group, "passed": None, "reviewed": None, "red_seen": False}
 
 
 def tree(root: Path, state: State) -> str:
@@ -607,6 +607,51 @@ def current_task(cfg: Config) -> str | None:
 
 
 @locked
+def record_red(cfg: Config) -> State | None:
+    """A test step of the gate failed while a group is in flight: the "red" of red/green.
+
+    Any `sdd check` counts, including the implementer's own, because a failing test is how
+    test-first starts. It is evidence that a failing run happened, not proof that the
+    failure was the right one.
+    """
+    state = load(cfg.root)
+    if state is None or not state["active"] or not _gate(state)["group"]:
+        return None
+    if _gate(state).get("red_seen"):
+        return state
+    _gate(state)["red_seen"] = True
+    save(cfg.root, state)
+    return state
+
+
+RED_WAIVER = "red-first waived: "
+
+
+def tdd_problem(cfg: Config, state: State, task_id: str, risk: str) -> str | None:
+    """Why the group has no red run on record, or None. A human task has no tests to run."""
+    if cfg.tdd_mode == "off" or risk == "human" or not has_test_step(cfg):
+        return None
+    if _gate(state).get("red_seen"):
+        return None
+    notes = _task(state, task_id)["assumptions"]
+    if any(str(note).startswith(RED_WAIVER) for note in notes):
+        return None
+    return (
+        "no failing test run was recorded for this group, so test-first is not shown; "
+        "write the failing test, run `sdd check`, then implement. If no test applies, "
+        f'say why with `sdd done {task_id} --waive-red "reason"`'
+    )
+
+
+def has_test_step(cfg: Config) -> bool:
+    return any(is_test_step(step.name) for step in cfg.check)
+
+
+def is_test_step(name: str) -> bool:
+    return "test" in name.lower()
+
+
+@locked
 def record_failure(cfg: Config, task_id: str, signature: str) -> State:
     state = require(cfg.root)
     entry = _task(state, task_id)
@@ -676,11 +721,24 @@ def done_problem(cfg: Config, state: State, task_id: str, risk: str = "high") ->
         return "no passing `sdd check` for the code as it is now; run the gate again"
     if risk not in cfg.review_skip and gate["reviewed"] != now:
         return "no clean review for the code as it is now; review it (again) first"
-    return scope.problem(cfg, state)
+    problem = scope.problem(cfg, state)
+    if problem:
+        return problem
+    return tdd_problem(cfg, state, task_id, risk) if cfg.tdd_mode == "enforce" else None
+
+
+def red_warning(cfg: Config, state: State, task_id: str) -> str | None:
+    """Warn mode: the same finding, shown but not blocking."""
+    if cfg.tdd_mode != "warn":
+        return None
+    risk = "high"
+    with suppress(OSError, ValueError):  # an unreadable table: assume the strictest risk
+        risk = {t.id: t.risk for t in parse_tasks(tasks_path(cfg.root, state))}.get(task_id, "high")
+    return tdd_problem(cfg, state, task_id, risk)
 
 
 @locked
-def complete(cfg: Config, task_id: str, human: bool = False) -> State:
+def complete(cfg: Config, task_id: str, human: bool = False, waive_red: str | None = None) -> State:
     """Tick a task, but only after a passing gate and a clean review of the current tree."""
     state = require(cfg.root)
     path = tasks_path(cfg.root, state)
@@ -689,6 +747,9 @@ def complete(cfg: Config, task_id: str, human: bool = False) -> State:
         halt(cfg.root, state, problem)
         raise ValueError(problem)
     risk = {t.id: t.risk for t in parse_tasks(path)}.get(task_id, "high")
+    if waive_red:
+        # Kept in the task's assumptions, so the user sees the reason in the report.
+        _task(state, task_id)["assumptions"].append(f"{RED_WAIVER}{waive_red}")
     problem = done_problem(cfg, state, task_id, risk)
     if problem:
         raise ValueError(problem)

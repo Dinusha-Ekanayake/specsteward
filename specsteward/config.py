@@ -100,6 +100,7 @@ class Config:
     graphify_auto: bool = True  # keep a code graph built and fresh, in the background
     graphify_version: str = GRAPHIFY_VERSION
     scope_mode: str = "enforce"  # enforce | warn | off: changes outside the plan's files
+    tdd_mode: str = "warn"  # off | warn | enforce: a failing test run before the passing one
     symbol_mode: str = "warn"  # enforce | warn | off: public symbols the plan does not name
     scope_allow: tuple[str, ...] = ()  # extra globs a run may always touch
 
@@ -230,6 +231,9 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
     scope = raw.get("scope", {})
     scope_mode = str(scope.get("mode", "enforce"))
     symbol_mode = str(scope.get("symbols", "warn"))
+    tdd_mode = str(raw.get("tdd", {}).get("red_first", "warn"))
+    if tdd_mode not in ("enforce", "warn", "off"):
+        raise ValueError("[tdd] red_first must be 'enforce', 'warn' or 'off'")
     for key, value in (("mode", scope_mode), ("symbols", symbol_mode)):
         if value not in ("enforce", "warn", "off"):
             raise ValueError(f"[scope] {key} must be 'enforce', 'warn' or 'off'")
@@ -271,6 +275,7 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
         review_skip=_review_skip(raw.get("review", {})),
         scope_mode=scope_mode,
         symbol_mode=symbol_mode,
+        tdd_mode=tdd_mode,
         scope_allow=_tuple(scope.get("allow")),
     )
 

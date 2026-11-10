@@ -202,6 +202,7 @@ def _parser() -> argparse.ArgumentParser:
     done = sub.add_parser("done", help=_help("done"))
     done.add_argument("task")
     done.add_argument("--human", action="store_true", help="mark [?]: needs sign-off")
+    done.add_argument("--waive-red", metavar="REASON", help="no failing test applies; say why")
     assume = sub.add_parser("assume", help=_help("assume"))
     assume.add_argument("task")
     assume.add_argument("text")
@@ -403,6 +404,8 @@ def _check(cfg: cfg_mod.Config, task: str | None) -> int:
     if all(r.ok for r in results):
         run_state.record_pass(cfg, before)
         return 0
+    if any(not r.ok and run_state.is_test_step(r.name) for r in results):
+        run_state.record_red(cfg)
     # Only the orchestrator's gate (`--task`) counts toward the failure caps: the
     # implementer runs the same check while it works, and a failing test is how test-first
     # starts, so its own runs must never halt the run.
@@ -494,7 +497,7 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         "start": lambda: run_state.start(cfg, args.spec, not args.no_branch_check),
         "agent": lambda: run_state.record_agent(cfg, args.role, args.fresh),
         "review": lambda: run_state.record_review(cfg, args.task, args.verdict),
-        "done": lambda: run_state.complete(cfg, args.task, args.human),
+        "done": lambda: run_state.complete(cfg, args.task, args.human, args.waive_red),
         "signoff": lambda: run_state.signoff(cfg, args.task),
         "assume": lambda: run_state.record_assumption(root, args.task, args.text),
         "halt": lambda: run_state.halt(root, run_state.require(root), args.reason),
@@ -503,6 +506,10 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         "stop": lambda: run_state.stop(root),
     }
     state = actions[command]()
+    if command == "done":
+        note = run_state.red_warning(cfg, state, args.task)
+        if note:
+            print(f"warning: {note}", file=sys.stderr)
     if command == "done" and cfg.symbol_mode == "warn":
         for name in scope_mod.unplanned_symbols(cfg, state):
             note = f"warning: unplanned change {name}; name it in the plan or revert"

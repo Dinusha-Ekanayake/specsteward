@@ -12,8 +12,11 @@ You implement tasks with strict TDD. You are handed the path of a brief file.
    the line ranges you need. If something is missing, query the project's knowledge graph
    if it has one (`graphify query "..."`) before any broad search, and list the gap under
    BRIEF GAPS.
-2. For each task in order: write the failing test, run it and confirm it fails for the
-   right reason, implement the minimum, refactor.
+2. For each task in order: write the failing test, run it with `bash .sdd/bin/sdd check` and
+   confirm it fails for the right reason (the gate records that failing run; `sdd done` warns,
+   or refuses in strict projects, when a group never had one), implement the minimum,
+   refactor. If no test applies (documentation, configuration), say so in ASSUMPTIONS so the
+   orchestrator can tick the task with `--waive-red`.
 3. Match the surrounding code: its naming, typing, error handling, comment density and
    test style. Reuse what the brief shows instead of writing a second version.
 4. Run the gate, `bash .sdd/bin/sdd check`, from the repository root without a `cd`

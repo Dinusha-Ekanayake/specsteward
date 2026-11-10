@@ -60,6 +60,9 @@ Yes, one per git worktree: `bash .sdd/bin/sdd worktree 005`.
 **Why so many permission prompts?**
 Only the gates prompt: approving a spec, trusting `sdd.toml`, starting or resuming a run (they reset counters), commit, push and PR. Other shell commands (your test runner, `graphify`) prompt too unless you allow them in `.claude/settings.json`; `init` pre-allows only `bash .sdd/bin/sdd` and a few read-only `git` commands. The gate prompts are the guarantee that an agent cannot approve its own work.
 
+**Claude Code shows `WSL ... execvpe(/bin/bash) failed` on Windows.**
+A hook called a bare `bash`, and Windows found `C:\Windows\System32\bash.exe`, the WSL launcher, before Git's bash. It fails when no Linux distribution is installed. Releases before 0.6.0 started their hooks that way, so on an affected PATH the guards did not run at all. Update the plugin (`claude plugin marketplace update specsteward`, then `claude plugin update specsteward@specsteward`) and restart Claude Code: the hooks now go through `scripts/hooks/run.cmd`, which finds Git Bash itself (`CLAUDE_CODE_GIT_BASH_PATH`, next to `git.exe`, the usual install folders) and never uses the WSL stub. If Git for Windows is missing, the hook says so and does nothing.
+
 **`sdd doctor` says specsteward hooks are in `.claude/settings.json` and in the plugin.**
 Releases 0.3.2 and 0.3.3 wrote the hooks into each project; the plugin now ships them, so each would run twice. Run `/specsteward:init` once in the project (it removes only those seven entries) and restart Claude Code.
 

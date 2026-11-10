@@ -89,6 +89,17 @@ The approval hash proves the spec, plan and task table did not change. It cannot
 
 `symbols` goes one level deeper, inside files the plan does name: a public function, class or method that a run adds or changes in a file that existed before the run must be mentioned in backticks in `plan.md` or `tasks.md` (`` `login()` ``, `` `Auth.login` ``). Private names (leading underscore), new files and tests are not checked. Python is compared by syntax tree (a moved or reformatted function is not a change); JavaScript and TypeScript only see new `export`s. The default is `warn`, which prints the names on `sdd done`; `enforce` makes `sdd done` refuse until they are named, which changes the plan and so needs approval again.
 
+## `[tdd]`
+
+```toml
+[tdd]
+red_first = "warn"   # warn | enforce | off
+```
+
+Test-first is an instruction to the implementer, so specsteward also keeps evidence of it. Every `sdd check` during a run whose test step fails (a step whose name contains "test") marks the group in flight as having had a red run. With `warn` (the default), `sdd done` prints a warning when it ticks a task from a group that never failed a test; with `enforce` it refuses. `off` turns it off. A project without a test step, and `human` tasks, are never asked.
+
+This proves a failing test run happened before the passing one, not that the failure was the right one or that the test came before the code. When no test applies (documentation, configuration), the task can still be ticked with `sdd done T-003-01 --waive-red "documentation only"`; the reason is kept in the task's assumptions, so the report shows it.
+
 ## `[limits]`
 
 | Key | Default | Halts when |

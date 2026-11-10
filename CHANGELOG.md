@@ -2,6 +2,12 @@
 
 ## 0.6.0 (2026-11-10)
 
+### Fixed
+- **Windows: every hook failed when `System32` came before Git on `PATH`.** Hooks started `bash` by name, which Windows resolves to the WSL launcher (`C:\Windows\System32\bash.exe`) and which fails with `WSL ... execvpe(/bin/bash) failed` when no distribution is installed. On such machines the guards, the formatter and the run loop never ran, and Claude Code showed the error after every turn. Hooks now go through `scripts/hooks/run.cmd`, a file that works as a Windows batch file and as a POSIX script; it finds Git Bash itself and never uses the WSL stub, and the hook scripts run with the shell that is already running them (`"$BASH"`).
+
+### Added
+- Red-before-green evidence: `[tdd] red_first` (`warn` by default, `enforce`, `off`). `sdd done` warns, or refuses, when a task group never had a failing test run before its passing one; `sdd done T --waive-red "reason"` records why no test applies.
+
 ### Security
 - Found by an independent audit and fixed:
   - The shell guard now looks through quoting, escapes, letter case, wildcards, `cd` into protected folders, `env`/`sudo`/`nohup` prefixes, `bash -lc`, here-documents and shells fed from a pipe, and asks for inline interpreter code that names run state or the environment. It also guards the Windows PowerShell tool (the hooks and the `ask` rules covered only Bash there).

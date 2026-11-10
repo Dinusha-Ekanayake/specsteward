@@ -33,6 +33,9 @@ human = "opus"
 
 # Per-task reviews. skip = ["low"] saves a reviewer run per low-risk group; the final
 # Opus review of the branch still covers those tasks. High and human risk always get one.
+[tdd]
+# red_first = "warn"   # warn | enforce | off: a failing test run must come before the passing one
+
 [review]
 skip = []
 
