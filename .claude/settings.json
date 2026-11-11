@@ -5,13 +5,28 @@
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
-      "Bash(git rev-parse:*)"
+      "Bash(git rev-parse:*)",
+      "PowerShell(bash .sdd/bin/sdd:*)"
     ],
     "ask": [
       "Bash(bash .sdd/bin/sdd approve:*)",
       "Bash(bash .sdd/bin/sdd trust:*)",
       "Bash(bash .sdd/bin/sdd resume:*)",
-      "Bash(bash .sdd/bin/sdd start:*)"
+      "Bash(bash .sdd/bin/sdd start:*)",
+      "Bash(bash .sdd/bin/sdd signoff:*)",
+      "Bash(bash .sdd/bin/sdd phone:*)",
+      "Bash(bash .sdd/bin/sdd install:*)",
+      "Bash(bash .sdd/bin/sdd worktree:*)",
+      "Bash(bash .sdd/bin/sdd init:*)",
+      "PowerShell(bash .sdd/bin/sdd approve:*)",
+      "PowerShell(bash .sdd/bin/sdd trust:*)",
+      "PowerShell(bash .sdd/bin/sdd start:*)",
+      "PowerShell(bash .sdd/bin/sdd resume:*)",
+      "PowerShell(bash .sdd/bin/sdd signoff:*)",
+      "PowerShell(bash .sdd/bin/sdd phone:*)",
+      "PowerShell(bash .sdd/bin/sdd install:*)",
+      "PowerShell(bash .sdd/bin/sdd worktree:*)",
+      "PowerShell(bash .sdd/bin/sdd init:*)"
     ],
     "deny": [
       "Edit(.sdd/**)",
