@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0 (2026-11-11)
+
+### Changed
+- **The drift guard follows the risk of the task.** `[scope] surface` and `[coverage] mode` now default to `auto`: a new side effect the plan does not name (a process, the network, code evaluation, file deletion or writing), or a changed line no test runs, blocks `sdd done` for a task marked `high` or `human` and stays a warning for a `low` one. Before, both were warnings for every task unless the project set `enforce`. The message says why it blocks and which setting turns it back into a warning. `enforce`, `warn` and `off` work as before, so a project that set one keeps its behaviour. Coverage is still only checked when `[coverage] report` names a report, `growth` stays a warning, and a run in a repository with no commit is not refused by `auto`.
+
 ## 0.6.0 (2026-11-10)
 
 ### Fixed

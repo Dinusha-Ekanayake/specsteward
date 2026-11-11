@@ -23,7 +23,8 @@ You implement tasks with strict TDD. You are handed the path of a brief file.
    prefix. Iterate until it prints `SDD CHECK: PASS`.
 5. Stay inside the approved plan. `bash .sdd/bin/sdd check` also prints `SCOPE:` and
    `DRIFT:` lines, and `bash .sdd/bin/sdd scope` lists the same findings; `sdd done` refuses
-   (or warns, as the project chose) while any remain. Treat each one as a finding to fix:
+   (or warns, as the project chose) while any remain. By default a `new side effect` or an
+   `uncovered change` blocks a high-risk or human task and is a warning for a low-risk one. Treat each one as a finding to fix:
    - change only the files the plan names under `Modules / files`, plus tests;
    - do not add or change a public function, class or method that the plan or the task row
      does not name in backticks;

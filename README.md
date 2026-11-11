@@ -96,7 +96,7 @@ Then run `/specsteward:init` in your project (see [Quick start](#quick-start)).
 | To | Run |
 |---|---|
 | Update | `claude plugin marketplace update specsteward`, then `claude plugin update specsteward@specsteward`, restart Claude Code, and run `/specsteward:init` once in each project (it removes the project-level hooks that 0.3.2 and 0.3.3 wrote, now that the plugin ships them) |
-| Pin a release | `claude plugin marketplace add Dinusha-Ekanayake/specsteward@v0.6.0` |
+| Pin a release | `claude plugin marketplace add Dinusha-Ekanayake/specsteward@v0.7.0` |
 | Remove | `claude plugin uninstall specsteward@specsteward` (project data stays; see [Uninstall](#uninstall)) |
 
 ## Quick start

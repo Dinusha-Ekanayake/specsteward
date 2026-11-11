@@ -765,7 +765,7 @@ def done_problem(cfg: Config, state: State, task_id: str, risk: str = "high") ->
         return "no passing `sdd check` for the code as it is now; run the gate again"
     if risk not in cfg.review_skip and gate["reviewed"] != now:
         return "no clean review for the code as it is now; review it (again) first"
-    problem = scope.problem(cfg, state) or drift.problem(cfg, state)
+    problem = scope.problem(cfg, state) or drift.problem(cfg, state, risk)
     if problem:
         return problem
     return tdd_problem(cfg, state, task_id, risk) if cfg.tdd_mode == "enforce" else None
@@ -777,6 +777,12 @@ def _task_risk(cfg: Config, state: State, task_id: str) -> str:
         return {t.id: t.risk for t in parse_tasks(tasks_path(cfg.root, state))}.get(task_id, "high")
     except (OSError, ValueError):
         return "high"
+
+
+def flight_risk(cfg: Config, state: State) -> str:
+    """The strictest risk among the tasks in flight; "low" when none is in flight."""
+    risks = {_task_risk(cfg, state, task_id) for task_id in _gate(state)["group"]}
+    return next((risk for risk in ("human", "high") if risk in risks), "low")
 
 
 def red_warning(cfg: Config, state: State, task_id: str) -> str | None:

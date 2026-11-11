@@ -149,6 +149,75 @@ def test_enforce_refuses_and_warn_only_reports(repo: Path) -> None:
     assert drift.notes(replace(cfg, surface_mode="off"), run) == []
 
 
+def test_by_default_a_side_effect_blocks_a_high_risk_task_and_warns_for_a_low_one(
+    repo: Path,
+) -> None:
+    cfg, run = _symbol_project(repo)
+    _edit(repo, "import socket\n\n\ndef login():\n    return 1\n\n\ndef other():\n    return 2\n")
+    assert drift.problem(cfg, run, "low") is None
+    for risk in ("high", "human"):
+        found = str(drift.problem(cfg, run, risk))
+        assert "new side effect: src/mod.py: new import socket" in found
+        assert f"the task is {risk} risk" in found and '`[scope] surface = "warn"`' in found
+    # the project's own choice wins over the risk
+    assert drift.problem(replace(cfg, surface_mode="warn"), run, "high") is None
+    assert drift.problem(replace(cfg, surface_mode="off"), run, "high") is None
+    assert "is high risk" not in str(
+        drift.problem(replace(cfg, surface_mode="enforce"), run, "low")
+    )
+    # growth is too noisy to block on by default
+    big = (
+        "def login():\n" + "".join(f"    a{i} = {i} + {i}\n" for i in range(60)) + "    return 1\n"
+    )
+    _edit(repo, big + "\n\ndef other():\n    return 2\n")
+    assert any("large change" in line for line in drift.notes(cfg, run))
+    assert drift.problem(cfg, run, "high") is None
+
+
+def test_by_default_uncovered_lines_block_a_high_risk_task_when_a_report_is_set(
+    repo: Path,
+) -> None:
+    cfg, run = _symbol_project(repo)
+    _edit(repo, "def login():\n    return 1\n\n\ndef other():\n    x = 3\n    return x\n")
+    assert drift.problem(cfg, run, "high") is None  # no report configured: nothing to check
+    cfg = replace(cfg, coverage_report="coverage.xml", check=())
+    _report(repo, {1: 1, 2: 1, 5: 1, 6: 1, 7: 0})
+    run_state.next_step(cfg)
+    run_state.record_pass(cfg)  # the gate's run left this report behind
+    run = run_state.require(repo)
+    assert drift.problem(cfg, run, "low") is None
+    assert "uncovered change: src/mod.py: lines 7" in str(drift.problem(cfg, run, "high"))
+    assert '`[coverage] mode = "warn"`' in str(drift.problem(cfg, run, "high"))
+
+
+def test_done_refuses_a_high_risk_task_with_an_unplanned_side_effect(repo: Path) -> None:
+    cfg, _run = _symbol_project(repo)
+    cfg = replace(cfg, symbol_mode="off", check=())
+    _edit(repo, "import socket\n\n\ndef login():\n    return 1\n\n\ndef other():\n    return 2\n")
+    task = run_state.next_step(cfg)["tasks"][0]
+    state = run_state.require(repo)
+    assert run_state._task_risk(cfg, state, task) == "high"
+    assert run_state.flight_risk(cfg, state) == "high"
+    run_state.record_pass(cfg)
+    run_state.record_review(cfg, task, "clean")
+    with pytest.raises(ValueError, match="new side effect.*the task is high risk"):
+        run_state.complete(cfg, task)
+    _edit(repo, "def login():\n    return 1\n\n\ndef other():\n    return 3\n")
+    run_state.record_pass(cfg)
+    run_state.record_review(cfg, task, "clean")
+    run_state.complete(cfg, task)
+
+
+def test_a_run_with_no_commit_is_only_refused_when_the_project_asked_for_enforce(
+    repo: Path,
+) -> None:
+    cfg, run = _symbol_project(repo)
+    run = {**run, "scope": {**run["scope"], "base": ""}}
+    assert drift.problem(cfg, run, "high") is None
+    assert drift.notes(cfg, run) == [f"not checked: {drift.NO_BASE}"]
+    assert drift.problem(replace(cfg, surface_mode="enforce"), run, "high") == drift.NO_BASE
+
+
 def test_done_refuses_in_enforce_mode_until_the_drift_is_gone(repo: Path) -> None:
     cfg, _run = _symbol_project(repo)
     cfg = replace(cfg, surface_mode="enforce", symbol_mode="off", check=())
@@ -334,5 +403,8 @@ def test_the_settings_are_validated(repo: Path) -> None:
         with pytest.raises(ValueError):
             from_dict(repo, bad)
     cfg = config.load(repo)
-    assert (cfg.surface_mode, cfg.growth_mode, cfg.coverage_mode) == ("warn",) * 3
+    assert (cfg.surface_mode, cfg.growth_mode, cfg.coverage_mode) == ("auto", "warn", "auto")
+    assert from_dict(repo, {"scope": {"surface": "auto"}}).surface_mode == "auto"
+    with pytest.raises(ValueError, match="growth must be 'enforce', 'warn' or 'off'"):
+        from_dict(repo, {"scope": {"growth": "auto"}})
     assert cfg.max_growth == 80 and cfg.coverage_report == ""

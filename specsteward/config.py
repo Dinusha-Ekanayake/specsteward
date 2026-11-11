@@ -103,10 +103,10 @@ class Config:
     tdd_mode: str = "warn"  # off | warn | enforce: a failing test run before the passing one
     symbol_mode: str = "warn"  # enforce | warn | off: public symbols the plan does not name
     scope_allow: tuple[str, ...] = ()  # extra globs a run may always touch
-    surface_mode: str = "warn"  # enforce | warn | off: new imports and calls that reach out
+    surface_mode: str = "auto"  # auto | enforce | warn | off: new imports and calls reaching out
     growth_mode: str = "warn"  # enforce | warn | off: a function that grew past max_growth
     max_growth: int = 80  # syntax-tree nodes a function may gain in one run
-    coverage_mode: str = "warn"  # enforce | warn | off: changed lines no test runs
+    coverage_mode: str = "auto"  # auto | enforce | warn | off: changed lines no test runs
     coverage_report: str = ""  # Cobertura XML or lcov file the test step writes; "" = unused
 
     def spec_dir(self, spec: str) -> Path:
@@ -303,20 +303,23 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
     tdd_mode = str(raw.get("tdd", {}).get("red_first", "warn"))
     if tdd_mode not in ("enforce", "warn", "off"):
         raise ValueError("[tdd] red_first must be 'enforce', 'warn' or 'off'")
-    surface_mode = str(scope.get("surface", "warn"))
+    # "auto": blocks for a high-risk or human task, warns for a low-risk one
+    surface_mode = str(scope.get("surface", "auto"))
     growth_mode = str(scope.get("growth", "warn"))
     coverage = raw.get("coverage", {})
-    coverage_mode = str(coverage.get("mode", "warn"))
+    coverage_mode = str(coverage.get("mode", "auto"))
     for key, value in (
         ("mode", scope_mode),
         ("symbols", symbol_mode),
-        ("surface", surface_mode),
         ("growth", growth_mode),
     ):
         if value not in ("enforce", "warn", "off"):
             raise ValueError(f"[scope] {key} must be 'enforce', 'warn' or 'off'")
-    if coverage_mode not in ("enforce", "warn", "off"):
-        raise ValueError("[coverage] mode must be 'enforce', 'warn' or 'off'")
+    by_risk = ("auto", "enforce", "warn", "off")
+    if surface_mode not in by_risk:
+        raise ValueError("[scope] surface must be 'auto', 'enforce', 'warn' or 'off'")
+    if coverage_mode not in by_risk:
+        raise ValueError("[coverage] mode must be 'auto', 'enforce', 'warn' or 'off'")
     max_growth = scope.get("max_growth", 80)
     if isinstance(max_growth, bool) or not isinstance(max_growth, int) or max_growth < 0:
         raise ValueError("[scope] max_growth must be a whole number, 0 or more (0 turns it off)")

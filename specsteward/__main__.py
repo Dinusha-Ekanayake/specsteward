@@ -510,7 +510,7 @@ def _run_command(args: argparse.Namespace, cfg: cfg_mod.Config) -> int:
         blocked = (
             (files and cfg.scope_mode == "enforce")
             or (symbols and cfg.symbol_mode == "enforce")
-            or drift.problem(cfg, run)
+            or drift.problem(cfg, run, run_state.flight_risk(cfg, run))
         )
         return 1 if blocked else 0
     if command == "remote":
