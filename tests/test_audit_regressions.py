@@ -375,3 +375,176 @@ def test_javascript_exports_and_bad_symbol_mode() -> None:
     }
     with pytest.raises(ValueError, match="symbols"):
         from_dict(Path("."), {"scope": {"symbols": "x"}})
+
+
+# --- scope hardening ------------------------------------------------------------------------
+
+
+def test_a_file_dirty_before_the_run_is_still_watched_for_new_changes(repo: Path) -> None:
+    from specsteward import scope
+    from specsteward import state as run_state
+
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "old.py").write_text("def a():\n    return 1\n", encoding="utf-8")
+    plan = repo / "specs" / "009-demo" / "plan.md"
+    plan.write_text("# Plan\n\n| `src/new.py` | one |\n", encoding="utf-8")
+    cfg = config.load(repo)
+    _git_repo(repo)
+    (repo / "src" / "old.py").write_text("def a():\n    return 2\n", encoding="utf-8")  # dirty
+    run_state.approve(cfg, "009", "test")
+    run_state.start(cfg, "009", check_branch=False)
+    run = run_state.require(repo)
+    assert scope.out_of_scope(cfg, run) == []  # the earlier edit is not the run's
+    (repo / "src" / "old.py").write_text("def a():\n    return 3\n", encoding="utf-8")
+    assert scope.out_of_scope(cfg, run) == ["src/old.py"]
+
+
+def test_a_passing_mention_does_not_name_a_symbol() -> None:
+    from specsteward.scope import named_symbols
+
+    plan = (
+        "# Plan\n\n## Modules / files\n| `src/a.py` | `login` |\n\n## Risks\nNever touch `purge`.\n"
+    )
+    tasks = "| T-009-01 | add `refresh` | t | low | [ ] |\n"
+    assert named_symbols(plan, tasks) == {"src", "a", "py", "login", "refresh"}
+
+
+def test_a_clean_verdict_needs_a_reviewer_after_the_last_passing_gate(repo: Path) -> None:
+    from specsteward import state as run_state
+
+    cfg = config.load(repo)
+    run_state.start(cfg, "009", check_branch=False)
+    task = run_state.next_step(cfg)["tasks"][0]
+    state = run_state.require(repo)
+    state["observed_agent_runs"] = 1
+    run_state.save(repo, state)
+    run_state.observe_agent(cfg, "specsteward:reviewer", None)
+    run_state.record_pass(cfg)  # the code passed the gate again after that reviewer
+    with pytest.raises(ValueError, match="reviewer"):
+        run_state.record_review(cfg, task, "clean")
+    run_state.observe_agent(cfg, "specsteward:reviewer", None)
+    run_state.record_review(cfg, task, "clean")
+
+
+# --- the PowerShell tool (Windows) -----------------------------------------------------------
+
+
+def _ps_ask(command: str) -> bool:
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": command}}
+    return shell_guard_decision(payload) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bash .sdd/bin/sdd trust",
+        r"& bash.exe .sdd\bin\sdd approve 001",
+        r".\.sdd\bin\sdd.cmd approve 001",
+        'powershell -Command "bash .sdd/bin/sdd trust"',
+        "pwsh -c bash .sdd/bin/sdd start 001",
+        'cmd /c "bash .sdd/bin/sdd signoff T-001-01"',
+        "iex 'bash .sdd/bin/sdd resume'",
+        "Invoke-Expression 'bash .sdd/bin/sdd trust'",
+        "powershell -EncodedCommand YgBhAHMAaAA=",
+        r"Set-Content .sdd\state.json '{}'",
+        "Remove-Item -Recurse .sdd",
+        r"'{}' | Out-File .claude\settings.json",
+        "echo hi; Set-Content ~/.claude/specsteward/trust.json x",
+    ],
+)
+def test_powershell_commands_that_touch_the_gates_ask(command: str) -> None:
+    assert _ps_ask(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["Get-ChildItem", "git status", "bash .sdd/bin/sdd status", "Get-Content a.py", "pytest -q"],
+)
+def test_ordinary_powershell_commands_do_not_ask(command: str) -> None:
+    assert not _ps_ask(command)
+
+
+def test_other_tools_are_still_ignored_by_the_shell_guard() -> None:
+    payload = {"tool_name": "Read", "tool_input": {"command": "bash .sdd/bin/sdd trust"}}
+    assert shell_guard_decision(payload) is None
+
+
+def test_init_adds_powershell_gates_and_doctor_reports_them_when_missing(tmp_path: Path) -> None:
+    import sys
+
+    from specsteward.doctor import FAIL, WARN, run_doctor
+    from specsteward.init import POWERSHELL_ASK, init_project
+
+    init_project(tmp_path, "generic")
+    settings = tmp_path / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert set(POWERSHELL_ASK) <= set(data["permissions"]["ask"])
+    assert "PowerShell(bash .sdd/bin/sdd:*)" in data["permissions"]["allow"]
+    data["permissions"]["ask"] = [r for r in data["permissions"]["ask"] if "PowerShell" not in r]
+    settings.write_text(json.dumps(data), encoding="utf-8")
+    found = [f for f in run_doctor(tmp_path) if "PowerShell tool" in f.what]
+    assert len(found) == 1
+    assert found[0].level == (FAIL if sys.platform == "win32" else WARN)
+
+
+def test_hooks_json_matches_the_powershell_tool_too() -> None:
+
+    hooks = json.loads((Path(__file__).parent.parent / "hooks" / "hooks.json").read_text("utf-8"))
+    for event in ("PreToolUse", "PostToolUse"):
+        matchers = [group.get("matcher", "") for group in hooks["hooks"][event]]
+        assert "Bash|PowerShell" in matchers
+
+
+# --- security audit: scope, globs and tool folders ---------------------------------------------
+
+
+def test_renames_into_the_allowed_tests_folder_are_seen(repo: Path) -> None:
+    import subprocess
+
+    from specsteward import scope
+    from specsteward import state as run_state
+
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "auth.py").write_text("def login():\n    return 1\n", encoding="utf-8")
+    plan = repo / "specs" / "009-demo" / "plan.md"
+    plan.write_text("# Plan\n\n| `src/other.py` | one |\n", encoding="utf-8")
+    cfg = config.load(repo)
+    _git_repo(repo)
+    run_state.approve(cfg, "009", "test")
+    run_state.start(cfg, "009", check_branch=False)
+    (repo / "tests").mkdir(exist_ok=True)
+    subprocess.run(
+        ["git", "mv", "src/auth.py", "tests/auth_moved.py"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    assert "src/auth.py" in scope.out_of_scope(cfg, run_state.require(repo))
+
+
+def test_globs_do_not_cross_folders_with_a_single_star() -> None:
+    from specsteward.scope import _matches
+
+    assert _matches("pkg/test_a.py", "**/test_*")
+    assert _matches("test_a.py", "**/test_*")
+    assert not _matches("src/test_pkg/prod.py", "**/test_*")
+    assert _matches("tests/deep/x.py", "tests/**")
+    assert not _matches("src/a/b.ts", "src/*.ts")
+    assert _matches("src/a.ts", "src/*.ts")
+
+
+def test_a_folder_named_venv_inside_the_project_is_not_hidden(repo: Path) -> None:
+    from specsteward.worktree import fingerprint
+
+    nested = repo / "src" / "venv"
+    nested.mkdir(parents=True)
+    (nested / "m.py").write_text("a = 1\n", encoding="utf-8")
+    before = fingerprint(repo)
+    (nested / "m.py").write_text("a = 2\n", encoding="utf-8")
+    assert fingerprint(repo) != before
+
+
+def test_hostile_source_does_not_crash_the_symbol_scan() -> None:
+    from specsteward.scope import _py_symbols
+
+    assert _py_symbols("x = " + "(" * 5000 + "1" + ")" * 5000) == {}

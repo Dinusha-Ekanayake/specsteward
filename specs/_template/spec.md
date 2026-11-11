@@ -11,9 +11,13 @@
 ### Non-goals
 
 ## Requirements
+<!-- Testable and measurable. Unsure? Write [NEEDS CLARIFICATION: question]. -->
 - REQ-<NNN>-01:
 
 ## Acceptance criteria
 - [ ] AC-01:
+
+## Clarifications
+<!-- Answers to [NEEDS CLARIFICATION] questions, one line each, with the date. -->
 
 ## Risks and open questions

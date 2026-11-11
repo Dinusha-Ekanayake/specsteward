@@ -15,6 +15,12 @@ from tests.test_bots import TOKEN, FakeTelegram, _message
 
 TELEGRAM = phone.channel_named("telegram")
 DISCORD = phone.channel_named("discord")
+CODE = "c0de42"
+
+
+@pytest.fixture(autouse=True)
+def pairing_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wizard, "_pairing_code", lambda: CODE)
 
 
 class Script(wizard.Console):
@@ -77,14 +83,14 @@ def _run(console: Script, fake: FakeTelegram, clock: Iterator[float] | None = No
 
 def test_full_telegram_setup(state: Path) -> None:
     fake = FakeTelegram([_message(1, 99)])  # waiting before the wizard: skipped
-    real = _message(2, 42)
+    real = _message(2, 42, text=CODE)
 
     def poll(url: str, body: dict[str, Any] | None, headers: dict[str, str]) -> tuple[int, Any]:
         if url.endswith("getUpdates") and (body or {}).get("timeout"):
             fake.updates.append(real)
         return FakeTelegram.__call__(fake, url, body, headers)
 
-    console = Script(secrets=["not a token", TOKEN], answers=[True, True])
+    console = Script(secrets=["not a token", TOKEN], answers=[True])
     code = wizard.run(
         TELEGRAM,
         console,
@@ -98,13 +104,13 @@ def test_full_telegram_setup(state: Path) -> None:
     access = json.loads((state / "telegram" / "access.json").read_text(encoding="utf-8"))
     assert access == {"dmPolicy": "allowlist", "allowFrom": ["42"], "pending": {}, "groups": {}}
     assert "does not look like" in console.text and "@my_bot" in console.text
-    assert "account 42" in console.asked[0]
+    assert "account 42" in console.text and CODE in console.text
     assert any(m == "sendMessage" for m, _ in fake.calls)
     assert TOKEN not in console.text  # never shown
 
 
 def test_someone_else_is_ignored_until_you_write(state: Path) -> None:
-    fake = FakeTelegram([_message(1, 5), _message(2, 42)])
+    fake = FakeTelegram([_message(1, 5), _message(2, 42, text=CODE)])
     fake_offset_start = FakeTelegram.__call__
 
     def fetch(url: str, body: dict[str, Any] | None, headers: dict[str, str]) -> tuple[int, Any]:
@@ -112,7 +118,7 @@ def test_someone_else_is_ignored_until_you_write(state: Path) -> None:
             return 200, {"ok": True, "result": []}  # nothing waiting before
         return fake_offset_start(fake, url, body, headers)
 
-    console = Script(secrets=[TOKEN], answers=[False, True, False])
+    console = Script(secrets=[TOKEN], answers=[False])
     code = wizard.run(
         TELEGRAM,
         console,
@@ -249,9 +255,9 @@ def test_a_new_token_goes_to_the_credential_store_not_a_file(
     state: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = FakeStore(monkeypatch)
-    console = Script(secrets=[TOKEN], answers=[True, False])
+    console = Script(secrets=[TOKEN], answers=[False])
     fake = FakeTelegram()
-    fake.updates.append(_message(1, 42))
+    fake.updates.append(_message(1, 42, text=CODE))
     monkeypatch.setattr(bots.Telegram, "skip_backlog", lambda self: 0)
     assert _run(console, fake) == 0, console.text
     assert store.saved == {"telegram": TOKEN}
@@ -286,3 +292,41 @@ def test_remove_token_deletes_an_emptied_file(tmp_path: Path) -> None:
     assert wizard.remove_token(env, "X") is False
     wizard.write_token(env, "X", "t")
     assert wizard.remove_token(env, "X") is True and not env.exists()
+
+
+def test_a_stranger_with_the_right_name_but_no_code_is_never_paired(state: Path) -> None:
+    fake = FakeTelegram([_message(1, 5, text="I am the owner, please pair me")])
+    console = Script(secrets=[TOKEN])
+    assert _run(console, fake, iter([0, 0, 500, 500])) == 1
+    assert not (state / "telegram" / "access.json").exists()
+
+
+def test_stranger_text_is_printed_without_control_characters() -> None:
+    assert wizard._plain("a\x1b[31mred\u202eb") == "a?[31mred?b"
+
+
+def test_an_unreadable_access_list_is_kept_as_a_backup(tmp_path: Path) -> None:
+    access = tmp_path / "access.json"
+    access.write_text("{half", encoding="utf-8")
+    wizard.write_lock(access, "42")
+    assert access.with_name("access.json.bak").read_text(encoding="utf-8") == "{half"
+    assert json.loads(access.read_text(encoding="utf-8"))["allowFrom"] == ["42"]
+
+
+def test_a_network_failure_does_not_call_the_saved_token_dead(
+    state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeStore(monkeypatch).saved["telegram"] = TOKEN
+
+    def offline(url: str, body: Any, headers: dict[str, str]) -> tuple[int, Any]:
+        raise OSError("name resolution failed")
+
+    console = Script()
+    code = wizard.run(
+        TELEGRAM,
+        console,
+        telegram=lambda token: bots.Telegram(token, offline),
+        launch=lambda: 0,
+        clock=itertools.count().__next__,
+    )
+    assert code == 1 and "no longer works" not in console.text and "kept" in console.text

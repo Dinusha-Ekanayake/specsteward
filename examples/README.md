@@ -8,7 +8,8 @@ claude                      # then: /specsteward:init   (keeps the existing sdd.
 ```
 
 `init` keeps the example's `sdd.toml` but does not trust a file it did not write. Read
-it (one `pytest` step), then in Claude Code:
+it (one `pytest` step). Then run the three `bash` lines in a terminal (or in Claude Code
+with a `!` in front) and the last line in Claude Code:
 
 ```text
 bash .sdd/bin/sdd trust

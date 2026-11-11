@@ -37,11 +37,13 @@ class FakeTelegram:
         return 200, {"ok": True, "result": True}
 
 
-def _message(update_id: int, user_id: int, chat_type: str = "private") -> dict[str, Any]:
+def _message(
+    update_id: int, user_id: int, chat_type: str = "private", text: str = "hi"
+) -> dict[str, Any]:
     person = {"id": user_id, "first_name": "Ann", "username": "ann"}
     return {
         "update_id": update_id,
-        "message": {"from": person, "chat": {"type": chat_type}, "text": "hi"},
+        "message": {"from": person, "chat": {"type": chat_type}, "text": text},
     }
 
 

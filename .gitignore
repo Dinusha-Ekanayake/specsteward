@@ -9,4 +9,8 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
+coverage.xml
+dist/
+build/
+*.egg-info/
 graphify-out/

@@ -60,6 +60,9 @@ Yes, one per git worktree: `bash .sdd/bin/sdd worktree 005`.
 **Why so many permission prompts?**
 Only the gates prompt: approving a spec, trusting `sdd.toml`, starting or resuming a run (they reset counters), commit, push and PR. Other shell commands (your test runner, `graphify`) prompt too unless you allow them in `.claude/settings.json`; `init` pre-allows only `bash .sdd/bin/sdd` and a few read-only `git` commands. The gate prompts are the guarantee that an agent cannot approve its own work.
 
+**Claude Code shows `WSL ... execvpe(/bin/bash) failed` on Windows.**
+A hook called a bare `bash`, and Windows found `C:\Windows\System32\bash.exe`, the WSL launcher, before Git's bash. It fails when no Linux distribution is installed. Releases before 0.6.0 started their hooks that way, so on an affected PATH the guards did not run at all. Update the plugin (`claude plugin marketplace update specsteward`, then `claude plugin update specsteward@specsteward`) and restart Claude Code: the hooks now go through `scripts/hooks/run.cmd`, which finds Git Bash itself (`CLAUDE_CODE_GIT_BASH_PATH`, next to `git.exe`, the usual install folders) and never uses the WSL stub. If Git for Windows is missing, the hook says so and does nothing.
+
 **`sdd doctor` says specsteward hooks are in `.claude/settings.json` and in the plugin.**
 Releases 0.3.2 and 0.3.3 wrote the hooks into each project; the plugin now ships them, so each would run twice. Run `/specsteward:init` once in the project (it removes only those seven entries) and restart Claude Code.
 
@@ -118,7 +121,7 @@ An approval covers the spec, the plan and the task definitions exactly as approv
 **`switch to a feature/003-* or fix/003-* branch first`**
 Runs happen on the spec's branch: `git checkout -b feature/003-rate-limit`. To turn the check off, set `branch_prefix = ""` in `[project]`.
 
-**`a run for spec 003 is already active; use sdd resume`** / **`...; run sdd stop first`**
+**`a run for spec 003 is already active; continue it with sdd next ...`** / **`...; run sdd stop first`**
 Only one run per checkout. Resume the active one, stop it, or use `bash .sdd/bin/sdd worktree <NNN>` for parallel specs.
 
 ## When a run halts
@@ -143,6 +146,33 @@ A halt means the run needs you. `bash .sdd/bin/sdd status` shows the reason. Dea
 **`no passing sdd check for the code as it is now; run the gate again`**
 `done` only ticks a task when the last passing gate saw the current code. Something changed since (often the reviewer's extra test). Run `bash .sdd/bin/sdd check` again.
 
+**`the run is halted (...)`**
+A halted run takes no review verdict, agent run or tick until you resume it. `bash .sdd/bin/sdd status` shows why it stopped; deal with that, then `bash .sdd/bin/sdd resume`.
+
+**`changes outside the approved plan: ...`**
+The run changed a file the plan's `Modules / files` table does not name. Revert the file, or add it to `plan.md` and approve the spec again (`bash .sdd/bin/sdd scope` lists the files). In `[scope] mode = "warn"` this is a warning.
+
+**`unplanned changes inside planned files: ...`**
+A public function, class or method was added or changed without being named in the plan or the task row. Name it there in backticks and approve again, or revert it. Only refused with `[scope] symbols = "enforce"`.
+
+**`uncovered change: ...`**, **`new side effect: ...`**, **`large change: ...`**
+The drift guard looks inside the files the plan names. `uncovered change`: lines the run changed that no test runs (`changed but no test runs them`); write the test and run the gate. `new side effect`: a new import of, or call to, a process, the network, code evaluation, file deletion or file writing; name it in the plan and approve again, or remove it. `large change`: a function grew past `[scope] max_growth`, or a large new function is not named in the plan. These are warnings unless the project set `enforce`.
+
+**`the coverage report is older than the changes; run the gate again`** / **`the coverage report is not the one the last passing gate wrote`**
+`[coverage]` reads the report your test step writes. It must come from the gate's own run on the code as it is now; run `bash .sdd/bin/sdd check` again.
+
+**`git's exclude settings (.git/info/exclude or core.excludesFile) changed during this run`**
+Those settings hide new files from git, so they would also hide them from the gate and the scope check. Undo the change, or `sdd stop` and start the run again.
+
+**`no failing test run was recorded for this group`**
+`[tdd] red_first`: the gate never saw a test fail before it passed. Run the failing test through `bash .sdd/bin/sdd check` before implementing. If no test applies, tick with `sdd done <task> --waive-red "reason"`.
+
+**`no reviewer subagent has finished since the last clean verdict and passing gate`**
+A clean verdict is only taken after a reviewer agent has really run on the code the gate passed. Run the reviewer (a new one, if a reused one was not counted), then record the verdict.
+
+**`switch to a feature/003-* or fix/003-* branch first`**
+A run starts only on the spec's branch. `approve --start` checks this before approving, so nothing was approved. `git checkout -b feature/003-<name>`, then approve again.
+
 **`no clean review for the code as it is now; review it (again) first`**
 The code changed after the review, or the review asked for changes. Review again.
 
@@ -156,7 +186,7 @@ A file that configures the gate (lint, type, test or coverage settings) changed 
 The task table needs `| ID | Task | Test | Risk | Status |`, with Status last.
 
 **Tests pass but the code is wrong.**
-The gate proves consistency, not correctness. Strengthen the acceptance criteria, mark the task `high` risk (Opus review plus an adversarial test), and add the rule to `specs/constitution.md`.
+The gate proves consistency, not correctness. Strengthen the acceptance criteria, mark the task `high` risk (Opus review, and the reviewer is asked for an adversarial test; the gate does not check that it did), and add the rule to `specs/constitution.md`.
 
 ## Phone control problems
 

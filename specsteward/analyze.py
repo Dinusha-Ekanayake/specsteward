@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from specsteward.scope import planned_paths
+
 CRITICAL, HIGH, MEDIUM, LOW = "CRITICAL", "HIGH", "MEDIUM", "LOW"
 MAX_FINDINGS = 30
 CLARIFY = re.compile(r"\[NEEDS CLARIFICATION[^\]]*\]", re.IGNORECASE)
@@ -146,6 +148,15 @@ def analyze(spec_dir: Path) -> list[Finding]:
         found.append(Finding(MEDIUM, "spec.md", "no acceptance criteria (`- [ ] AC-n: ...`)"))
     found += _coverage(reqs, tasks) + _vague(reqs, acs) + _paths(tasks, plan)
     found += _duplicates(reqs) + _fix_checks(spec, tasks)
+    if plan and not planned_paths(plan):
+        found.append(
+            Finding(
+                HIGH,
+                "plan.md",
+                "names no files in backticks, so the scope guard has nothing to check; list "
+                "each file the tasks create or change under `Modules / files`",
+            )
+        )
     order = {CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3}
     return sorted(found, key=lambda f: order[f.level])
 

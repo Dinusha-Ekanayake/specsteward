@@ -34,10 +34,12 @@ Long agent runs fail in predictable ways. specsteward has a mitigation for each:
 |---|---|
 | Every subagent re-reads the whole spec | A generated **brief** per task group: the task rows, matching plan lines, requirements and signatures of related code, capped in size |
 | Agents read files one by one | A **graphify code graph** is installed, built and kept fresh automatically; agents query it first |
-| Reviewing everything with the biggest model is expensive | **Risk tags** (`low`, `high`, `human`) pick the reviewer model; high-risk reviews also write one adversarial test |
+| Reviewing everything with the biggest model is expensive | **Risk tags** (`low`, `high`, `human`) pick the reviewer model; high-risk reviews are asked to write one adversarial test (an instruction to the reviewer, not a check the gate enforces) |
 | Lint and test output floods the context | One **gate** command prints a 2-line summary plus only the failing lines |
 | Loops that never converge | Halts on the same failure twice, too many fix attempts, a second review round with open findings, an agent-run cap (counted by a hook), or no progress between automatic continues. Resetting a cap needs your permission |
 | Agents working around the gate | Approval is bound to the spec's content; `done` needs a passing gate and a clean review of the current code; gate config changes fail the check; run state cannot be edited; gate commands and writes to run state ask you however they are spelled |
+| Code wandering outside the approved plan | **Scope guard**: `sdd done` refuses files the plan does not name. Inside planned files, unplanned public names, new process, network or file-write use, changed lines no test runs and functions that outgrow a budget are listed (`warn`) or refused (`enforce`). Widening the scope means editing the plan, which you approve again |
+| Tests written after the code | `[tdd] red_first` records that a failing test run came before the passing one |
 | A cloned repo runs commands on your machine | `sdd.toml` commands run only after you trust that exact file |
 | Agent context grows until it drifts | The implementer is restarted every few tasks |
 | Green tests that prove nothing | The reviewer checks that tests would fail if the code were wrong |
@@ -54,7 +56,7 @@ Long agent runs fail in predictable ways. specsteward has a mitigation for each:
 |---|---|
 | Features of several steps, where you want the plan agreed first and every step tested and reviewed | One-line fixes, renames, quick questions: a spec and an approval would only slow you down |
 | Long runs you do not want to babysit: caps stop loops, halts ask you, and the phone pings you | Exploring or prototyping, where the goal is still moving |
-| Code where a silent wrong guess is costly (data, money, security): risky tasks get the stronger reviewer and an adversarial test | Throwaway scripts |
+| Code where a silent wrong guess is costly (data, money, security): risky tasks get the stronger reviewer, who is asked for an adversarial test | Throwaway scripts |
 | Bugs worth a regression test: `/specsteward:run fix "<bug>"` writes the failing test first | Changes you can check by eye in a minute |
 
 Day to day you use three things: `/specsteward:run plan <topic>`, approve, and `/specsteward:run <NNN>`. The other commands are for the agents or for setup.
@@ -94,7 +96,7 @@ Then run `/specsteward:init` in your project (see [Quick start](#quick-start)).
 | To | Run |
 |---|---|
 | Update | `claude plugin marketplace update specsteward`, then `claude plugin update specsteward@specsteward`, restart Claude Code, and run `/specsteward:init` once in each project (it removes the project-level hooks that 0.3.2 and 0.3.3 wrote, now that the plugin ships them) |
-| Pin a release | `claude plugin marketplace add Dinusha-Ekanayake/specsteward@v0.3.7` |
+| Pin a release | `claude plugin marketplace add Dinusha-Ekanayake/specsteward@v0.6.0` |
 | Remove | `claude plugin uninstall specsteward@specsteward` (project data stays; see [Uninstall](#uninstall)) |
 
 ## Quick start
@@ -107,7 +109,7 @@ In your project:
 /specsteward:init
 ```
 
-This detects your stack (Python, Node, Go, Rust or a Makefile) and builds the gate from the tools the project already uses, so `sdd.toml` normally needs no editing. It also writes spec templates under `specs/_template/`, `.gitignore` entries and permission rules, then starts building the code graph in the background. It runs `sdd doctor`, which prints a fix for anything missing, and `sdd check` once. Restart Claude Code so the permission rules load.
+This detects your stack (Python, Node, Go, Rust or a Makefile) and builds the gate from the tools the project already uses, so `sdd.toml` normally needs no editing. If init says `NOT trusted` (Node and Makefile gates run your own scripts), read `sdd.toml` and run `bash .sdd/bin/sdd trust` yourself. It also writes spec templates under `specs/_template/`, `.gitignore` entries and permission rules, then starts building the code graph in the background. It runs `sdd doctor`, which prints a fix for anything missing, and `sdd check` once. Restart Claude Code so the permission rules load.
 
 Optional: `bash .sdd/bin/sdd init --statusline` shows the run in Claude Code's status line, and `.sdd/dashboard.html` is a read-only page of the run you can keep open in a browser.
 
@@ -126,10 +128,10 @@ Tip: run the orchestrating session on Sonnet (`/model sonnet`). Opus is still us
 | Gate | How it works |
 |---|---|
 | Spec approval | `sdd approve` is an **ask** permission rule, bound to the spec's content. Nothing implements an unapproved or since-edited spec |
-| Trust, start, resume | **ask** rules: trusting `sdd.toml`, starting a run and resuming after a halt (which resets counters) |
+| Trust, start, resume, sign-off | **ask** rules: trusting `sdd.toml`, starting a run, resuming after a halt (which resets counters) and signing off a `human` task |
 | `human` tasks | Real-data runs, interpreting results, release steps. Prepared automatically, ticked `[?]` for your sign-off |
 | Behaviour-changing questions | The run halts and asks; answer with `answer: ...` |
-| Commit, push, PR | `git commit`, `git push`, `gh pr create` are **ask** rules |
+| Commit, push, PR | `git commit`, `git push`, `gh pr create` and `gh pr merge` are **ask** rules |
 
 ## Phone control (Telegram or Discord)
 
@@ -139,7 +141,7 @@ specsteward uses Anthropic's official Telegram or Discord channel plugin instead
 bash .sdd/bin/sdd phone setup        # --channel discord for Discord
 ```
 
-It installs Bun and the plugin, then guides you: create the bot, paste the token, send it one message, confirm it was you. The token goes into your system's credential store, the bot is locked to your account, and from then on you start phone sessions with `claude-phone`. See [docs/phone.md](docs/phone.md).
+It installs Bun and the plugin, then guides you: create the bot, paste the token, then send the bot the one-time code the terminal shows. The token goes into your system's credential store, the bot is locked to your account, and from then on you start phone sessions with `claude-phone`. See [docs/phone.md](docs/phone.md).
 
 | You send | Effect |
 |---|---|
@@ -177,7 +179,7 @@ Risk is `low`, `high` or `human`. Status is `[ ]` open, `[x]` done, `[?]` waitin
 | Specs | `analyze`, `approve`, `worktree` |
 | Running a spec | `start`, `next`, `halt`, `resume`, `signoff`, `claim`, `stop` |
 | Views and status | `status`, `dashboard`, `statusline`, `graph`, `remote` |
-| Used by the agents | `agent`, `brief`, `check`, `review`, `done`, `assume`, `converge` |
+| Used by the agents | `agent`, `brief`, `check`, `scope`, `review`, `done`, `assume`, `converge` |
 
 You mostly need the first four groups; the agents call the last one. See [docs/how-it-works.md](docs/how-it-works.md).
 
@@ -212,7 +214,7 @@ specsteward collects no telemetry and sends nothing anywhere by itself. Everythi
 
 ```bash
 python -m venv .venv
-.venv/bin/pip install pytest pytest-cov ruff mypy   # Windows: .venv/Scripts/pip
+.venv/bin/pip install -r requirements-dev.txt   # Windows: .venv/Scripts/pip
 bash scripts/sdd.sh init --preset python   # the repo uses itself
 bash .sdd/bin/sdd trust                    # asks you first; the repo ships its own sdd.toml
 bash .sdd/bin/sdd check

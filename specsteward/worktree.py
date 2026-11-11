@@ -6,14 +6,18 @@ untracked files; run state and the task table being ticked are left out.
 """
 
 import hashlib
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from specsteward import gitsafe
+
 # Never part of the fingerprint, whatever the project's .gitignore says: specsteward's own
 # state, the code graph, environments, and files that tools regenerate when tests run.
-SKIP_DIRS = {".git", ".sdd", ".venv", "venv", "node_modules", "__pycache__", "graphify-out"}
+SKIP_DIRS = {".git", "node_modules", "__pycache__"}
 SKIP_DIRS |= {".mypy_cache", ".pytest_cache", ".ruff_cache", ".hypothesis", ".tox", ".nox"}
+# Environments and our own state are skipped at the top level only: a folder called `venv`
+# deeper down (`src/venv/`) is project code and must not be invisible to the gate and scope.
+TOP_LEVEL_ENV = {".sdd", ".venv", "venv", "graphify-out"}
 # Build output is only skipped at the top level (as the git pathspec below does): a source
 # package that happens to be called `out` or `coverage` deeper down is part of the fingerprint.
 TOP_LEVEL_SKIP = {"htmlcov", "coverage", ".nyc_output", "dist", "build", "target", ".next", "out"}
@@ -27,15 +31,12 @@ def _skipped(rel: str, excluded: set[str]) -> bool:
         or parts[-1] in SKIP_FILES
         or bool(SKIP_DIRS & set(parts[:-1]))
         or (len(parts) > 1 and parts[0] in TOP_LEVEL_SKIP)
+        or parts[0] in TOP_LEVEL_ENV
     )
 
 
 def _git(root: Path, *args: str) -> bytes | None:
-    try:
-        proc = subprocess.run(["git", *args], cwd=root, capture_output=True, check=False)
-    except OSError:
-        return None
-    return proc.stdout if proc.returncode == 0 else None
+    return gitsafe.output(root, *args)
 
 
 def _hash_files(root: Path, paths: list[Path], update: Callable[[bytes], None]) -> None:
@@ -52,7 +53,10 @@ def fingerprint(root: Path, exclude: tuple[str, ...] = ()) -> str:
     """sha256 of the uncommitted state of ``root``; ``exclude`` lists relative paths."""
     digest = hashlib.sha256()
     excluded = set(exclude)
-    skip = [f":(exclude){name}" for name in sorted(SKIP_DIRS | TOP_LEVEL_SKIP | SKIP_FILES)]
+    skip = [
+        f":(exclude){name}"
+        for name in sorted(SKIP_DIRS | TOP_LEVEL_SKIP | TOP_LEVEL_ENV | SKIP_FILES)
+    ]
     pathspec = [".", *(f":(exclude){rel}" for rel in exclude), *skip]
     diff = _git(root, "diff", "HEAD", "--binary", "--", *pathspec)
     listing = ["ls-files", "--others", "--exclude-standard", "-z", "--", *pathspec]
@@ -63,6 +67,8 @@ def fingerprint(root: Path, exclude: tuple[str, ...] = ()) -> str:
     if names is not None:
         digest.update(b"git\0" + (diff or b""))
         rels = [name for name in names.decode("utf-8", "replace").split("\0") if name]
+        # files git was told to treat as unchanged are hashed by content, so they still count
+        rels += [rel for rel in gitsafe.hidden_edits(root) if rel not in rels]
         _hash_files(
             root, [root / rel for rel in rels if not _skipped(rel, excluded)], digest.update
         )

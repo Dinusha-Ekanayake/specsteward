@@ -20,7 +20,9 @@ Check, in this order:
 3. **Project rules.** A violation of a rule under "Project rules" in the brief is
    CRITICAL. Then **project invariants** named in the spec or brief (for example data leakage, security,
    money handling, backwards compatibility, safety wording).
-4. **Silent decisions** the implementer made that the spec does not cover.
+4. **Silent decisions** the implementer made that the spec does not cover. Public names,
+   process or network use, file writes or deletions that the plan does not name are silent
+   decisions: HIGH. So is behaviour added to a function beyond what its task asks for.
 5. **Gate weakening.** New `skip`, `xfail`, `only`, `# noqa`, `# type: ignore`,
    `eslint-disable`, `@ts-ignore`, `#[allow(...)]`, lowered coverage thresholds, or
    removed or loosened assertions are HIGH unless the brief asks for them.

@@ -13,10 +13,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from specsteward import gitsafe, trust
 from specsteward import state as run_state
-from specsteward import trust
 from specsteward.config import CONFIG_FILE, CheckStep, Config, Wording
-from specsteward.remote import CHANNELS
+from specsteward.remote import env_without_tokens
 
 MAX_DETAIL_LINES = 25
 COVERAGE_LINE = re.compile(r"^(TOTAL\b|All files\b|Statements\s*:)")
@@ -42,15 +42,45 @@ _VENV_PYTHONS = (
 def _committed(root: Path, rel: str) -> bool:
     """True when git tracks ``rel``: a real virtual environment is never committed."""
     try:
+        inside = subprocess.run(
+            [*gitsafe.GIT, "rev-parse", "--is-inside-work-tree"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+        )
+        if inside.returncode != 0:
+            return False  # not a repository: nothing is tracked
         proc = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "--", rel],
+            [*gitsafe.GIT, "ls-files", "--error-unmatch", "--", rel],
             cwd=root,
             capture_output=True,
             check=False,
         )
     except OSError:
+        return False  # no git at all: nothing is tracked
+    # 1 is "not tracked". Anything else (0 tracked; 128 for a path beyond a tracked symlink
+    # or any other git failure) must not count as proof that the file is the user's own.
+    return proc.returncode != 1
+
+
+_MAGIC = (b"MZ", b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa")
+
+
+def _is_interpreter(path: Path, root: Path) -> bool:
+    """A real interpreter: a link to one outside the project, or a native executable.
+
+    A script (shebang) or an arbitrary file dropped into a folder that merely looks like a
+    virtual environment is not accepted, so the gate cannot be pointed at a forged "python".
+    """
+    try:
+        if path.is_symlink():
+            target = path.resolve(strict=True)
+            return not target.is_relative_to(root.resolve())
+        with path.open("rb") as handle:
+            head = handle.read(4)
+    except OSError:
         return False
-    return proc.returncode == 0
+    return head.startswith(_MAGIC)
 
 
 def project_python(root: Path) -> str:
@@ -62,12 +92,33 @@ def project_python(root: Path) -> str:
     for candidate in _VENV_PYTHONS:
         venv = root / candidate.split("/")[0]
         if (
-            (root / candidate).is_file()
+            not venv.is_symlink()
+            and (root / candidate).is_file()
             and (venv / "pyvenv.cfg").is_file()
+            and _is_interpreter(root / candidate, root)
             and not _committed(root, candidate)
         ):
             return str(root / candidate)
     return sys.executable
+
+
+def _which(exe: str) -> str | None:
+    """PATH lookup that never looks in the current directory (Windows does, by default)."""
+    if sys.platform != "win32":
+        return shutil.which(exe)
+    # Python before 3.12 ignores NoDefaultCurrentDirectoryInExePath, so look up PATH by hand.
+    here = os.path.normcase(os.path.abspath(os.curdir))
+    suffixes = (
+        [""] if Path(exe).suffix else [""] + os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";")
+    )
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        if not folder or os.path.normcase(os.path.abspath(folder)) == here:
+            continue
+        for suffix in suffixes:
+            candidate = os.path.join(folder.strip('"'), exe + suffix)
+            if os.path.isfile(candidate):
+                return candidate
+    return None
 
 
 def resolve_cmd(cmd: tuple[str, ...], root: Path) -> list[str]:
@@ -80,7 +131,7 @@ def resolve_cmd(cmd: tuple[str, ...], root: Path) -> list[str]:
     exe = project_python(root) if cmd[0] == PYTHON_PLACEHOLDER else cmd[0]
     has_sep = "/" in exe or "\\" in exe
     local = root / exe
-    found = str(local) if has_sep and local.is_file() else shutil.which(exe)
+    found = str(local) if has_sep and local.is_file() else _which(exe)
     if found is None:
         raise FileNotFoundError(exe)
     return [found, *cmd[1:]]
@@ -90,8 +141,7 @@ def without_bot_tokens() -> dict[str, str]:
     """This environment minus the phone bot tokens. In a `claude-phone` session the token
     is in Claude Code's environment for the channel plugin; the project's checks and
     formatters (code an agent may have written) have no use for it."""
-    secret = {channel.token_var for channel in CHANNELS}
-    return {key: value for key, value in os.environ.items() if key not in secret}
+    return env_without_tokens()
 
 
 def run_step(root: Path, step: CheckStep) -> StepResult:
@@ -166,7 +216,7 @@ def signature(results: list[StepResult]) -> str:
             line = re.sub(r":\d+(?::\d+)?", ":", line)
             line = re.sub(r"\b\d+(?:\.\d+)?m?s\b", "", line)
             parts.append(f"{result.name}|{line}")
-    return hashlib.sha1("\n".join(parts).encode()).hexdigest()[:12] if parts else ""
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12] if parts else ""
 
 
 def format_report(results: list[StepResult]) -> str:

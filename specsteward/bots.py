@@ -25,18 +25,23 @@ Fetch = Callable[[str, dict[str, Any] | None, dict[str, str]], tuple[int, Any]]
 class BotError(Exception):
     """A bot API call failed. ``conflict`` means another copy of the bot is polling."""
 
-    def __init__(self, message: str, conflict: bool = False) -> None:
+    def __init__(self, message: str, conflict: bool = False, unreachable: bool = False) -> None:
         super().__init__(message)
         self.conflict = conflict
+        self.unreachable = unreachable  # a network failure: says nothing about the token
 
 
 def _fetch(url: str, body: dict[str, Any] | None, headers: dict[str, str]) -> tuple[int, Any]:
+    if not url.startswith("https://"):
+        raise ValueError("refusing a non-https bot API url")
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(url, data=data, headers=headers)
     if data is not None:
         request.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:  # noqa: S310
+        with urllib.request.urlopen(  # noqa: S310  # nosec B310
+            request, timeout=HTTP_TIMEOUT
+        ) as response:
             return response.status, json.loads(response.read() or b"null")
     except urllib.error.HTTPError as error:
         try:
@@ -70,7 +75,8 @@ class Telegram:
         try:
             status, body = self._fetch(url, params or None, {})
         except (OSError, ValueError) as error:
-            raise BotError(f"could not reach Telegram: {masked(str(error), self._token)}") from None
+            message = f"could not reach Telegram: {masked(str(error), self._token)}"
+            raise BotError(message, unreachable=True) from None
         if isinstance(body, dict) and body.get("ok"):
             return body.get("result")
         description = body.get("description", "") if isinstance(body, dict) else ""

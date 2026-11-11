@@ -6,10 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-start.sh"
-            ],
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" ; ./scripts/hooks/run.cmd session-start",
             "timeout": 30
           }
         ]
@@ -21,23 +18,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/guard.sh"
-            ],
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" ; ./scripts/hooks/run.cmd guard",
             "timeout": 30
           }
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/shell-guard.sh"
-            ],
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" ; ./scripts/hooks/run.cmd shell-guard",
             "timeout": 30
           }
         ]
@@ -49,23 +40,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/format.sh"
-            ],
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" ; ./scripts/hooks/run.cmd format",
             "timeout": 60
           }
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/bind.sh"
-            ],
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" ; ./scripts/hooks/run.cmd bind",
             "timeout": 30
           }
         ]
@@ -76,10 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/stop.sh"
-            ],
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" ; ./scripts/hooks/run.cmd stop",
             "timeout": 30
           }
         ]
@@ -90,10 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/subagent-stop.sh"
-            ],
+            "command": "cd \"${CLAUDE_PLUGIN_ROOT}\" ; ./scripts/hooks/run.cmd subagent-stop",
             "timeout": 30
           }
         ]

@@ -28,6 +28,12 @@ def test_versions_agree() -> None:
     listed = {entry["version"] for entry in marketplace["plugins"]}
     assert plugin["version"] == package["project"]["version"] == top.group(1)
     assert listed == {plugin["version"]}
+    # the documents a user copies from name the same release
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert f"specsteward@v{plugin['version']}`" in readme, "README pin example is stale"
+    minor = ".".join(plugin["version"].split(".")[:2])
+    security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    assert f"| {minor}.x | Yes |" in security, "SECURITY.md does not list this release"
 
 
 def test_generated_config_follows_the_plugins_graphify_pin(tmp_path: Path) -> None:
@@ -157,6 +163,15 @@ def test_manifests_point_at_the_repository() -> None:
         "the gate has no [[check]] steps",
         "trust store is locked",
         "Bun is installed but not on PATH",
+        "the run is halted (",
+        "changes outside the approved plan:",
+        "unplanned changes inside planned files:",
+        "changed but no test runs them",
+        "the coverage report is older than the changes",
+        "the coverage report is not the one the last passing gate wrote",
+        "exclude settings (.git/info/exclude or core.excludesFile) changed during this",
+        "no failing test run was recorded for this group",
+        "no reviewer subagent has finished since the last clean verdict and passing gate",
     ],
 )
 def test_every_halt_and_error_is_explained_in_the_faq(message: str) -> None:

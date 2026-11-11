@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from specsteward.config import Config
+from specsteward.remote import env_without_tokens
 from specsteward.safefs import ensure_safe
 from specsteward.tasks import Task, parse_tasks
 
@@ -97,6 +98,7 @@ def _graphify(root: Path, query: str) -> str:
             errors="replace",
             check=False,
             timeout=60,
+            env=env_without_tokens(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -128,7 +130,7 @@ def _api_section(cfg: Config, plan_lines: list[str]) -> list[str]:
     roots = "|".join(re.escape(r) for r in path_roots(cfg))
     if not roots:
         return []
-    path_re = re.compile(rf"(?:{roots})/[\w/.-]+\.\w+")
+    path_re = re.compile(rf"(?:{roots})/(?:[\w-]+/|[\w-][\w.-]*/)*[\w-][\w.-]*\.\w+")
     named = set(path_re.findall("\n".join(plan_lines)))
     # A new module should reuse what its package already has, so show its siblings too.
     siblings = {
@@ -156,7 +158,7 @@ def build_brief(cfg: Config, spec_dir: Path, task_ids: list[str], sdd: str = "sd
     tasks = {t.id: t for t in parse_tasks(spec_dir / "tasks.md")}
     missing = [i for i in task_ids if i not in tasks]
     if missing:
-        raise ValueError(f"unknown tasks: {missing}")
+        raise ValueError(f"unknown tasks: {', '.join(missing)} (see the ID column of tasks.md)")
     chosen: list[Task] = [tasks[i] for i in task_ids]
     tokens = set().union(*(_tokens(f"{t.text} {t.test}") for t in chosen))
     plan_lines = _capped(_matching_lines(spec_dir / "plan.md", tokens), MAX_PLAN_LINES, "lines")

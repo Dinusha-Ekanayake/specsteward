@@ -6,7 +6,7 @@
 |---|---|
 | `agents/planner.md` (Opus) | Drafts spec, plan, tasks. Never approves |
 | `agents/implementer.md` (Sonnet) | TDD for one task group from a brief; reused across groups, restarted every few tasks |
-| `agents/reviewer.md` (Sonnet or Opus) | Reviews the diff against the brief; Opus plus an adversarial test on high-risk tasks |
+| `agents/reviewer.md` (Sonnet or Opus) | Reviews the diff against the brief; Opus on high-risk tasks, which it is also asked to probe with one adversarial test (not enforced by the gate) |
 | `agents/converger.md` (Opus) | After the last task: compares the code with the spec, plan and constitution and appends the missing work as new tasks (append-only) |
 | `agents/clerk.md` (Haiku) | Changelog, dev log and PR draft |
 | `skills/run` | The orchestration loop and the phone command table |
@@ -22,7 +22,7 @@ Everything that can be a script is a script, so models spend tokens only on judg
 sdd approve 003 --start  (prompt) records the spec's hash, then starts the run:
                          refuses unless approved content matches and the branch matches
 loop:
-  sdd next               -> {tasks, risk, review, reviewer_model, restart_implementer}
+  sdd next               -> {tasks, risk, review, reviewer_model, human_signoff, restart_implementer}
                             | halted | done   (records the group in flight)
   sdd brief T-003-01 ... -> .sdd/briefs/T-003-01.md
   implementer(brief)     -> short report
@@ -39,7 +39,7 @@ done: sdd converge -> converger appends missing work? -> you approve it (approve
 
 ## Stop hook
 
-While a run is active and tasks are open, the Stop hook asks Claude to continue, but only if a task was completed since the last automatic continue. No progress halts the run. A halted or stopped run never blocks a stop.
+While a run is active and tasks are open, the Stop hook asks Claude to continue, but only if a task was completed or a subagent finished since the last automatic continue. No progress halts the run. A halted or stopped run never blocks a stop.
 
 ## State
 

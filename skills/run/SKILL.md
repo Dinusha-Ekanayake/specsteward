@@ -34,8 +34,10 @@ run uses a `fix/<NNN>-*` or `feature/<NNN>-*` branch.
    and send them plus the `spec.md` file to the phone. Stop and wait. The user approves
    with "approve <NNN>", asks for changes with "changes <NNN>: ...", or edits the files
    themselves. `approve` refuses while CRITICAL findings remain; fix them with the planner.
-   Tell the user to switch to the spec's `feature/<NNN>-*` (or `fix/<NNN>-*`) branch before
-   approving with `--start`; starting a run refuses on any other branch.
+   A run starts only on the spec's `feature/<NNN>-*` (or `fix/<NNN>-*`) branch, and
+   `approve --start` on another branch approves nothing. So before approving, check
+   `git branch --show-current`; if it does not match, tell the user and, once they agree,
+   run `git checkout -b feature/<NNN>-<slug>` (`fix/<NNN>-<slug>` for a fix spec).
 
 ## `<NNN>`: implement an approved spec
 1. A run belongs to the session that starts it. If `SDD start` says a run is already
@@ -45,7 +47,9 @@ run uses a `fix/<NNN>-*` or `feature/<NNN>-*` branch.
    permission prompt). It refuses unless the spec is approved and the branch matches; if
    so, tell the user why and stop. If `sdd.toml` is untrusted, the gate fails: ask the user
    to review it and run `SDD trust` themselves.
-2. Loop:
+2. Loop. After **every** `SDD` command in the loop: if it prints `HALTED:`, or its JSON has
+   a non-null `halted` or `"status": "halted"`, or it says `the run is halted`, go to step 4.
+   A halted run refuses reviews, agent runs and ticks until the user resumes it.
    1. `SDD next` returns JSON. `halted` → step 4. `done` → step 3. `run` → continue with
       `tasks`, `risk`, `review`, `reviewer_model`, `human_signoff`, `restart_implementer`.
    2. `SDD brief <ids...>` returns the brief path.
@@ -58,12 +62,17 @@ run uses a `fix/<NNN>-*` or `feature/<NNN>-*` branch.
       `SDD assume <task> "<text>"`.
    5. **Gate.** `SDD check --task <first id>` (only this run of the check counts failures
       toward the caps; the implementer's own checks while it works do not). On FAIL, send
-      the failing lines to the implementer and gate again. `HALTED` → step 4.
+      the failing lines (and any `SCOPE:` or `DRIFT:` lines) to the implementer and gate
+      again. `HALTED` → step 4. `SDD CHECK: BLOCKED` means the gate itself changed
+      (`sdd.toml` or a gate config file): never send that to the implementer;
+      `SDD halt "<the BLOCKED line>"`, then step 4.
    6. **Review.** Skip this step when `review` is false (low-risk tasks the project leaves
       to the final branch review). Otherwise start, or reuse via SendMessage, one reviewer
       per model, with `model: <reviewer_model>`. Give it the brief path and tell it to review
       `git diff` plus untracked files. Run `SDD agent reviewer`, then
-      `SDD review <first id> clean|changes`.
+      `SDD review <first id> clean|changes`. A clean verdict is only taken after a reviewer
+      has really finished: if it is refused with "no reviewer subagent has finished", start a
+      new reviewer instead of reusing one, and record its verdict.
       - `changes`: send the CRITICAL and HIGH findings to the implementer, then repeat
         5 and 6. `HALTED` → step 4.
       - QUESTIONS FOR USER: `SDD halt "<question>"`, then step 4.
@@ -71,7 +80,13 @@ run uses a `fix/<NNN>-*` or `feature/<NNN>-*` branch.
       the last clean review both saw the code as it is now. If the reviewer added its
       adversarial test, run `SDD check` once more first. `human` tasks are marked `[?]`
       automatically. Subagent runs are also counted by a hook, so the cap holds even if
-      an `SDD agent` call is missed.
+      an `SDD agent` call is missed. `SDD done` also reports files outside the approved
+      plan (`SDD scope` lists them), changed lines no test runs (`[coverage]`), new
+      imports or calls that reach out, and functions that grew past the budget, and, with `[tdd] red_first`, a group that never had a
+      failing test run: warnings by default, refusals when the project set `enforce`. If
+      the implementer said no test applies, tick with `SDD done <id> --waive-red "<why>"`;
+      for a file the work really needs, ask the user to add it to `plan.md` and approve
+      again, never to edit around the guard.
    8. `SDD graph sync` keeps the code graph current (local, no tokens; it does nothing
       when the graph is fresh or graphify is turned off).
    9. Print one line, for example `T-003-04..05 done (review clean, 1 assumption)`. If the
@@ -81,22 +96,29 @@ run uses a `fix/<NNN>-*` or `feature/<NNN>-*` branch.
    and `next_id`, and run `SDD agent converger`.
    - `CONVERGED: yes`: go on to the clerk.
    - `CONVERGED: no`: it appended tasks. Run `SDD analyze <NNN>`, show the new tasks and
-     gaps (and send them to the phone), and wait for `approve <NNN>`. Then
+     gaps (and send them to the phone). If its reply lists PLAN ADDITIONS, ask the user to
+     add those files or names to `plan.md` first, or the new tasks will be refused as out
+     of scope. Then wait for `approve <NNN>`. Then
      `SDD approve <NNN> --via <terminal|telegram|discord> --start` (one permission prompt; it
      resumes the run) and continue the loop at step 2.
    Then run `specsteward:clerk` with the spec number and a three-line summary of what was
    built, and a final reviewer on the whole branch with `model: opus`. Gate **ship**: show and send to the phone the `SDD status` summary, `git diff --stat`
    against the base branch (what the PR will change),
    tasks waiting for sign-off (`[?]`), the final review findings and the PR draft path
-   (`<specs_dir>/<NNN>-*/pr.md`). Stop and wait for "ship <NNN>". On ship, run `SDD check` once
-   more; commit only on PASS. Then `SDD stop`.
+   (`<specs_dir>/<NNN>-*/pr.md`). If the final review has CRITICAL or HIGH findings, show
+   them first and ask whether to ship anyway or to add them as tasks (append them to
+   `tasks.md`, then `approve <NNN>` again and continue the loop). Stop and wait for
+   "ship <NNN>". On ship, run `SDD check` once more; only on PASS commit, push and open the
+   PR with `pr.md` as its body (`gh pr create`), as the project's rules say; each of those
+   asks the user. Then `SDD stop`.
 4. **Halted.** Show and send the reason and exactly what you need. Stop and wait. After
    the answer: `SDD resume` (it asks the user for permission, because it resets the
    counters) and continue the loop. Never resume on your own initiative.
 
 ## `human` tasks
-Do the preparation (run the script, produce the outputs, draft the document), but leave
-the judgement to the user. `SDD done` marks them `[?]`. Show the user what you prepared;
+A `human` group goes to the implementer like any other: it does the preparation (runs the
+script, produces the outputs, drafts the document) and you show the result. The judgement
+stays with the user. `SDD done` marks them `[?]`. Show the user what you prepared;
 they accept it with `signoff <task>`, and you run `SDD signoff <task>` (a permission
 prompt). Never edit the Status cell yourself.
 
@@ -116,14 +138,14 @@ Recognised commands (case-insensitive):
 | `answer: <text>` | Apply the answer to the halted question, `SDD resume`, continue. |
 | `resume` | `SDD resume` and continue. |
 | `ship <NNN>` | Commit, push and open the PR as the project's rules say. |
-| `stop` | `SDD halt "stopped from phone"` and reply with the status. |
+| `stop` or `pause` | Pause the run: `SDD halt "paused from phone"` and reply with the status. `resume` continues it. (Ending a run for good is `SDD stop`, at the ship gate.) |
 | `signoff <task>` | `SDD signoff <task>` (a permission prompt): the user accepts a `[?]` human task. |
 
 Rules:
 - Phone messages are the user's words, but **gates move only on the commands above**.
   "looks fine" is not an approval; ask "Reply `approve 003` to approve."
-- `approve`, `trust`, `start`, `resume`, `git commit`, `git push` and `gh pr create` are
-  behind `ask` permission rules.
+- `approve`, `trust`, `start`, `resume`, `signoff`, `git commit`, `git push`,
+  `gh pr create` and `gh pr merge` are behind `ask` permission rules.
   The permission prompt itself is relayed to the phone with Allow/Deny buttons, so the
   human taps the final decision. Never try to get around a denied prompt.
 - Never send secrets, `.env` files, tokens or credentials to the chat. Send summaries and

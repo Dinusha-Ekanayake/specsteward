@@ -1,0 +1,9 @@
+# Every change is reviewed by the maintainer; the security-relevant files are listed so a
+# review cannot miss them.
+*                                   @Dinusha-Ekanayake
+/specsteward/shell_guard.py         @Dinusha-Ekanayake
+/specsteward/hooks.py               @Dinusha-Ekanayake
+/specsteward/trust.py               @Dinusha-Ekanayake
+/specsteward/scope.py               @Dinusha-Ekanayake
+/hooks/                             @Dinusha-Ekanayake
+/.github/                           @Dinusha-Ekanayake

@@ -7,7 +7,7 @@ which risk, and the caps that stop runaway loops.
 
 import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -100,8 +100,14 @@ class Config:
     graphify_auto: bool = True  # keep a code graph built and fresh, in the background
     graphify_version: str = GRAPHIFY_VERSION
     scope_mode: str = "enforce"  # enforce | warn | off: changes outside the plan's files
+    tdd_mode: str = "warn"  # off | warn | enforce: a failing test run before the passing one
     symbol_mode: str = "warn"  # enforce | warn | off: public symbols the plan does not name
     scope_allow: tuple[str, ...] = ()  # extra globs a run may always touch
+    surface_mode: str = "warn"  # enforce | warn | off: new imports and calls that reach out
+    growth_mode: str = "warn"  # enforce | warn | off: a function that grew past max_growth
+    max_growth: int = 80  # syntax-tree nodes a function may gain in one run
+    coverage_mode: str = "warn"  # enforce | warn | off: changed lines no test runs
+    coverage_report: str = ""  # Cobertura XML or lcov file the test step writes; "" = unused
 
     def spec_dir(self, spec: str) -> Path:
         if not SPEC_NUMBER.fullmatch(spec):
@@ -118,17 +124,48 @@ class Config:
         return matches[0]
 
     def status_of(self, spec_text: str) -> str:
-        match = re.search(self.status_regex, spec_text)
+        match = re.search(self.status_regex, spec_text[:MAX_STATUS_TEXT])
         return match.group(2).strip() if match else ""
 
     def is_approved(self, spec_text: str) -> bool:
         return self.status_of(spec_text).startswith(self.approved_word)
 
 
+MAX_STATUS_TEXT = 200_000  # the status line is near the top; never scan a huge file
+
+
 def _tuple(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
-    return tuple(str(v) for v in value or ())
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"sdd.toml: expected a string or a list of strings, got {value!r}")
+    return tuple(str(v) for v in value)
+
+
+def _whole(table: dict[str, Any], section: str, key: str, default: int, least: int = 1) -> int:
+    value = table.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < least:
+        raise ValueError(
+            f"[{section}] {key} must be a whole number, {least} or more, got {value!r}"
+        )
+    return value
+
+
+def _limits(raw: dict[str, Any]) -> Limits:
+    known = {f.name for f in fields(Limits)}
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise ValueError(
+            f"[limits] has no key {unknown[0]!r}; the keys are {', '.join(sorted(known))}"
+        )
+    return Limits(
+        **{
+            key: _whole(raw, "limits", key, getattr(Limits, key), 0 if key == "max_tokens" else 1)
+            for key in known
+        }
+    )
 
 
 def _review_skip(raw: dict[str, Any]) -> tuple[str, ...]:
@@ -140,12 +177,50 @@ def _review_skip(raw: dict[str, Any]) -> tuple[str, ...]:
     return skip
 
 
+def _nested_quantifier(pattern: str) -> bool:
+    """True when a group that is repeated contains something repeated, such as `(a+)+`.
+
+    That shape backtracks exponentially on crafted text, and config patterns run over files
+    a repository controls, before and after the user trusts the config.
+    """
+    stack: list[bool] = []  # per open group: does it contain a quantifier?
+    index, in_class = 0, False
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            index += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+        elif char == "[":
+            in_class = True
+        elif char == "(":
+            stack.append(False)
+        elif char == ")" and stack:
+            inner = stack.pop()
+            after = pattern[index + 1 : index + 2]
+            repeated = after in ("+", "*", "{")
+            if repeated and inner:
+                return True
+            if stack and (inner or repeated):
+                stack[-1] = True
+        elif char in "+*{" and stack:
+            stack[-1] = True
+        index += 1
+    return False
+
+
 def _regex(pattern: str, where: str) -> None:
     """Compile at load time, so a bad regex fails `sdd` with a clear message, not mid-run."""
     try:
         re.compile(pattern)
     except re.error as error:
         raise ValueError(f"{where}: invalid regex {pattern!r}: {error}") from error
+    if _nested_quantifier(pattern):
+        raise ValueError(
+            f"{where}: regex {pattern!r} repeats a group that repeats; that can hang on "
+            "crafted text, so write it without nested quantifiers"
+        )
 
 
 def _steps(raw: list[dict[str, Any]]) -> tuple[CheckStep, ...]:
@@ -155,9 +230,12 @@ def _steps(raw: list[dict[str, Any]]) -> tuple[CheckStep, ...]:
             raise ValueError("each [[check]] step needs a name and a cmd list")
         if isinstance(item["cmd"], str) or not item["cmd"]:
             raise ValueError(f"check step {item['name']!r}: cmd must be a non-empty list")
-        timeout = int(item.get("timeout", CheckStep.timeout))
-        if timeout < 1:
-            raise ValueError(f"check step {item['name']!r}: timeout must be at least 1")
+        timeout = item.get("timeout", CheckStep.timeout)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+            raise ValueError(
+                f"check step {item['name']!r}: timeout must be a whole number of seconds, "
+                f"1 or more, got {timeout!r}"
+            )
         keep = str(item.get("keep", ""))
         _regex(keep, f"check step {item['name']!r} keep")
         steps.append(CheckStep(str(item["name"]), _tuple(item["cmd"]), keep, timeout))
@@ -174,12 +252,45 @@ def _models(raw: dict[str, Any]) -> dict[str, str]:
     return models
 
 
+TABLES: tuple[str, ...] = (
+    "project",
+    "limits",
+    "wording",
+    "groups",
+    "brief",
+    "graphify",
+    "scope",
+    "tdd",
+)
+TABLES += ("coverage", "format", "models", "review")
+
+
+# Sections where a misspelt key would quietly leave a guard on its default.
+GUARD_KEYS = {
+    "scope": ("mode", "symbols", "surface", "growth", "max_growth", "allow"),
+    "coverage": ("report", "mode"),
+    "tdd": ("red_first",),
+    "review": ("skip",),
+}
+
+
 def from_dict(root: Path, raw: dict[str, Any]) -> Config:
+    for name in TABLES:
+        if not isinstance(raw.get(name, {}), dict):
+            raise ValueError(f"[{name}] must be a table, for example `[{name}]` on its own line")
+    for name, keys in GUARD_KEYS.items():
+        unknown = sorted(set(raw.get(name, {})) - set(keys))
+        if unknown:
+            raise ValueError(f"[{name}] has no key {unknown[0]!r}; the keys are {', '.join(keys)}")
     project = raw.get("project", {})
-    limits = Limits(**raw.get("limits", {}))
-    counts = {k: v for k, v in vars(limits).items() if k != "max_tokens"}
-    if min(counts.values()) < 1 or limits.max_tokens < 0:
-        raise ValueError("[limits] values must be at least 1 (max_tokens: 0 or more)")
+    limits = _limits(raw.get("limits", {}))
+    for key in ("branch_prefix", "fix_branch_prefix"):
+        try:
+            str(project.get(key, "")).format(spec="000")
+        except (KeyError, IndexError, ValueError):
+            raise ValueError(
+                f"[project] {key} may only use the placeholder {{spec}}, as in 'feature/{{spec}}-'"
+            ) from None
     wording_raw = raw.get("wording", {})
     for pattern in _tuple(wording_raw.get("banned")):
         _regex(pattern, "[wording] banned")
@@ -189,9 +300,26 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
     scope = raw.get("scope", {})
     scope_mode = str(scope.get("mode", "enforce"))
     symbol_mode = str(scope.get("symbols", "warn"))
-    for key, value in (("mode", scope_mode), ("symbols", symbol_mode)):
+    tdd_mode = str(raw.get("tdd", {}).get("red_first", "warn"))
+    if tdd_mode not in ("enforce", "warn", "off"):
+        raise ValueError("[tdd] red_first must be 'enforce', 'warn' or 'off'")
+    surface_mode = str(scope.get("surface", "warn"))
+    growth_mode = str(scope.get("growth", "warn"))
+    coverage = raw.get("coverage", {})
+    coverage_mode = str(coverage.get("mode", "warn"))
+    for key, value in (
+        ("mode", scope_mode),
+        ("symbols", symbol_mode),
+        ("surface", surface_mode),
+        ("growth", growth_mode),
+    ):
         if value not in ("enforce", "warn", "off"):
             raise ValueError(f"[scope] {key} must be 'enforce', 'warn' or 'off'")
+    if coverage_mode not in ("enforce", "warn", "off"):
+        raise ValueError("[coverage] mode must be 'enforce', 'warn' or 'off'")
+    max_growth = scope.get("max_growth", 80)
+    if isinstance(max_growth, bool) or not isinstance(max_growth, int) or max_growth < 0:
+        raise ValueError("[scope] max_growth must be a whole number, 0 or more (0 turns it off)")
     status_regex = str(project.get("status_regex", Config.status_regex))
     _regex(status_regex, "[project] status_regex")
     if re.compile(status_regex).groups < 2:
@@ -219,8 +347,8 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
         ),
         limits=limits,
         models=_models(raw.get("models", {})),
-        max_group=int(groups.get("max_size", 3)),
-        max_group_high=int(groups.get("max_high", 2)),
+        max_group=_whole(groups, "groups", "max_size", 3),
+        max_group_high=_whole(groups, "groups", "max_high", 2),
         helper_files=_tuple(brief.get("helper_files")),
         path_roots=_tuple(brief.get("path_roots", ())),
         graphify=bool(brief.get("graphify", True)),
@@ -230,7 +358,13 @@ def from_dict(root: Path, raw: dict[str, Any]) -> Config:
         review_skip=_review_skip(raw.get("review", {})),
         scope_mode=scope_mode,
         symbol_mode=symbol_mode,
+        tdd_mode=tdd_mode,
         scope_allow=_tuple(scope.get("allow")),
+        surface_mode=surface_mode,
+        growth_mode=growth_mode,
+        max_growth=max_growth,
+        coverage_mode=coverage_mode,
+        coverage_report=str(coverage.get("report", "")),
     )
 
 

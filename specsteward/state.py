@@ -16,8 +16,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, TypeVar
 
-from specsteward import scope, trust, usage
-from specsteward.config import SPEC_NUMBER, Config
+from specsteward import drift, gitsafe, scope, trust, usage
+from specsteward.config import CONFIG_FILE, SPEC_NUMBER, Config
 from specsteward.dashboard import write_dashboard
 from specsteward.graph import ensure_ignores
 from specsteward.safefs import ensure_safe
@@ -125,9 +125,19 @@ def require(root: Path) -> State:
     state = load(root)
     if state is None or not state["active"]:
         raise ValueError(
-            "no active specsteward run; approve and start one with `sdd approve <NNN> --start`"
+            "no active specsteward run; approve and start one with `sdd approve <NNN> --start` "
+            "(or `sdd start <NNN>` when the spec is already approved)"
         )
     return state
+
+
+def _not_halted(state: State) -> None:
+    """A halted run waits for the user: no verdict, agent run or tick is taken meanwhile."""
+    if state.get("halted"):
+        raise ValueError(
+            f"the run is halted ({state['halted']}); show the user why, and continue only "
+            "after they resume it with `sdd resume`"
+        )
 
 
 def tasks_path(root: Path, state: State) -> Path:
@@ -137,7 +147,9 @@ def tasks_path(root: Path, state: State) -> Path:
 def current_branch(root: Path) -> str:
     """The checked-out branch; `symbolic-ref` also works before the first commit."""
     for args in (["symbolic-ref", "--short", "HEAD"], ["rev-parse", "--abbrev-ref", "HEAD"]):
-        proc = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            [*gitsafe.GIT, *args], cwd=root, capture_output=True, text=True, check=False
+        )
         if proc.returncode == 0 and proc.stdout.strip():
             return proc.stdout.strip()
     raise ValueError("not a git repository")
@@ -216,7 +228,7 @@ def create_worktree(cfg: Config, spec: str) -> Path:
         raise ValueError(f"{target} already exists")
     exists = (
         subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+            [*gitsafe.GIT, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
             cwd=cfg.root,
             capture_output=True,
             check=False,
@@ -235,7 +247,7 @@ def create_worktree(cfg: Config, spec: str) -> Path:
             continue
         ensure_safe(target, copy)
         if source.is_dir():
-            shutil.copytree(source, copy)
+            shutil.copytree(source, copy, symlinks=True)
         else:
             shutil.copy2(source, copy)
     return target
@@ -300,7 +312,33 @@ def tick_problem(cfg: Config, state: State) -> str | None:
 def integrity_problem(cfg: Config, state: State) -> str | None:
     """Approval and ticks, checked before anything trusts the spec or the task table."""
     directory = cfg.root / state["spec_dir"]
-    return approval_problem(cfg, state["spec"], directory) or tick_problem(cfg, state)
+    return (
+        approval_problem(cfg, state["spec"], directory)
+        or tick_problem(cfg, state)
+        or config_problem(cfg, state)
+    )
+
+
+def config_problem(cfg: Config, state: State) -> str | None:
+    """sdd.toml is bound to the run: trust remembers older versions too, so swapping one
+    back in (a weaker gate, a wider scope) would otherwise look trusted."""
+    recorded = state.get("config_hash")
+    if recorded is None or trust.file_hash(cfg.root / CONFIG_FILE) == recorded:
+        return None
+    return (
+        f"{CONFIG_FILE} changed since the run started; review it, run `sdd trust` "
+        "and then `sdd resume`"
+    )
+
+
+@locked
+def rebaseline_config(root: Path) -> None:
+    """After `sdd trust`: the reviewed sdd.toml is the one this run now follows."""
+    state = load(root)
+    if state is None or not state["active"]:
+        return
+    state["config_hash"] = trust.file_hash(root / CONFIG_FILE)
+    save(root, state)
 
 
 def approval_problem(cfg: Config, spec: str, directory: Path) -> str | None:
@@ -320,22 +358,37 @@ def approval_problem(cfg: Config, spec: str, directory: Path) -> str | None:
     return None
 
 
+def branch_problem(cfg: Config, spec: str) -> str | None:
+    """Why a run for ``spec`` cannot start on the checked-out branch, or None."""
+    prefix = cfg.branch_prefix.format(spec=spec)
+    if not prefix:
+        return None
+    allowed = [p for p in (prefix, cfg.fix_branch_prefix.format(spec=spec)) if p]
+    if any(current_branch(cfg.root).startswith(p) for p in allowed):
+        return None
+    return f"switch to a {' or '.join(p + '*' for p in allowed)} branch first"
+
+
 @locked
 def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
     """Start a fresh run. Refuses while a run is active, so counters are never wiped by accident."""
     current = load(cfg.root)
     if current is not None and current["active"]:
-        hint = "use `sdd resume`" if current["spec"] == spec else "run `sdd stop` first"
+        hint = (
+            "continue it with `sdd next` (`sdd claim` from a new session, `sdd resume` if it "
+            "is halted)"
+            if current["spec"] == spec
+            else "run `sdd stop` first"
+        )
         raise ValueError(f"a run for spec {current['spec']} is already active; {hint}")
     directory = cfg.spec_dir(spec)
     problem = approval_problem(cfg, spec, directory)
     if problem:
         raise ValueError(problem)
-    prefix = cfg.branch_prefix.format(spec=spec)
-    if check_branch and prefix:
-        allowed = [p for p in (prefix, cfg.fix_branch_prefix.format(spec=spec)) if p]
-        if not any(current_branch(cfg.root).startswith(p) for p in allowed):
-            raise ValueError(f"switch to a {' or '.join(p + '*' for p in allowed)} branch first")
+    if check_branch:
+        wrong = branch_problem(cfg, spec)
+        if wrong:
+            raise ValueError(wrong)
     tasks = parse_tasks(directory / "tasks.md")  # fail early on a malformed table
     trust.record_ticks(cfg.root, spec, {t.id: t.status for t in tasks})
     trust.record_guard(cfg.root, cfg.guard)  # baseline for the gate config check
@@ -356,6 +409,7 @@ def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
         "started_at": datetime.now(UTC).isoformat(),
         "usage": usage.empty(),
         "gate": _fresh_gate([]),
+        "config_hash": trust.file_hash(cfg.root / CONFIG_FILE),
         "scope": scope.snapshot(cfg.root),
         "tasks": {},
     }
@@ -365,7 +419,7 @@ def start(cfg: Config, spec: str, check_branch: bool = True) -> State:
 
 def _fresh_gate(group: list[str]) -> dict[str, Any]:
     """Which group is in flight, and the tree fingerprints its gate and review last saw."""
-    return {"group": group, "passed": None, "reviewed": None}
+    return {"group": group, "passed": None, "reviewed": None, "red_seen": False}
 
 
 def tree(root: Path, state: State) -> str:
@@ -443,6 +497,7 @@ OUR_AGENT_PREFIXES = ("specsteward:", "sdd-pilot:")
 @locked
 def record_agent(cfg: Config, role: str, fresh: bool) -> State:
     state = require(cfg.root)
+    _not_halted(state)
     state["agent_runs"] += 1
     state["last_agent_at"] = time.time()
     if role == "implementer" and fresh:
@@ -480,8 +535,11 @@ def bind_owner(cfg: Config, payload: dict[str, Any]) -> State | None:
     if not session_id or not _OWNING_COMMAND.search(command):
         return None
     state = load(cfg.root)
-    if state is None or not state["active"] or state.get("owner_session") == session_id:
+    if state is None or not state["active"]:
         return None
+    if state.get("owner_session") == session_id:
+        return None
+    state["hooks_live"] = True  # this hook ran, so SubagentStop is installed too
     state["owner_session"] = str(session_id)
     save(cfg.root, state)
     return state
@@ -504,6 +562,7 @@ def observe_agent(
     state["observed_agent_runs"] = int(state.get("observed_agent_runs", 0)) + 1
     if str(agent_type or "").endswith("reviewer"):
         state["observed_reviews"] = int(state.get("observed_reviews", 0)) + 1
+        state["last_reviewer_at"] = time.time()
     return _cap_agents(cfg, state)
 
 
@@ -561,6 +620,8 @@ def record_pass(cfg: Config, before: str | None = None) -> State | None:
     if before is not None and before != now:
         raise ValueError("files changed while the gate ran; run `sdd check` again")
     _gate(state)["passed"] = now
+    _gate(state)["passed_at"] = time.time()
+    _gate(state)["coverage"] = drift.report_digest(cfg)
     save(cfg.root, state)
     return state
 
@@ -572,6 +633,51 @@ def current_task(cfg: Config) -> str | None:
         return None
     group = _gate(state)["group"]
     return str(group[0]) if group else None
+
+
+@locked
+def record_red(cfg: Config) -> State | None:
+    """A test step of the gate failed while a group is in flight: the "red" of red/green.
+
+    Any `sdd check` counts, including the implementer's own, because a failing test is how
+    test-first starts. It is evidence that a failing run happened, not proof that the
+    failure was the right one.
+    """
+    state = load(cfg.root)
+    if state is None or not state["active"] or not _gate(state)["group"]:
+        return None
+    if _gate(state).get("red_seen"):
+        return state
+    _gate(state)["red_seen"] = True
+    save(cfg.root, state)
+    return state
+
+
+RED_WAIVER = "red-first waived: "
+
+
+def tdd_problem(cfg: Config, state: State, task_id: str, risk: str) -> str | None:
+    """Why the group has no red run on record, or None. A human task has no tests to run."""
+    if cfg.tdd_mode == "off" or risk == "human" or not has_test_step(cfg):
+        return None
+    if _gate(state).get("red_seen"):
+        return None
+    notes = _task(state, task_id)["assumptions"]
+    if any(str(note).startswith(RED_WAIVER) for note in notes):
+        return None
+    return (
+        "no failing test run was recorded for this group, so test-first is not shown; "
+        "write the failing test, run `sdd check`, then implement. If no test applies, "
+        f'say why with `sdd done {task_id} --waive-red "reason"`'
+    )
+
+
+def has_test_step(cfg: Config) -> bool:
+    return any(is_test_step(step.name) for step in cfg.check)
+
+
+def is_test_step(name: str) -> bool:
+    return "test" in name.lower()
 
 
 @locked
@@ -594,8 +700,11 @@ def _review_witnessed(state: State) -> bool:
     Enforced only once the hook has observed any subagent in this run; where the hook
     does not fire (an older Claude Code) the verdict stays honour-based.
     """
-    if not int(state.get("observed_agent_runs", 0)):
+    if not int(state.get("observed_agent_runs", 0)) and not state.get("hooks_live"):
         return True
+    passed_at = _gate(state).get("passed_at")
+    if passed_at is not None and float(state.get("last_reviewer_at", 0)) <= float(passed_at):
+        return False  # the code passed the gate again after the last reviewer finished
     return int(state.get("observed_reviews", 0)) > int(state.get("accepted_reviews", 0))
 
 
@@ -604,17 +713,21 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
     if verdict not in ("clean", "changes"):
         raise ValueError("verdict must be 'clean' or 'changes'")
     state = require(cfg.root)
+    _not_halted(state)
+    _known_task(cfg.root, state, task_id)
     group = _gate(state)["group"]
     if group and task_id not in group:
-        raise ValueError(f"{task_id} is not in the group in flight ({group}); review that group")
+        raise ValueError(
+            f"{task_id} is not in the group in flight ({', '.join(group)}); review that group"
+        )
     entry = _task(state, task_id)
     if verdict == "clean" and not _review_witnessed(state):
         raise ValueError(
-            "no reviewer subagent has finished since the last clean verdict; "
+            "no reviewer subagent has finished since the last clean verdict and passing gate; "
             "run specsteward:reviewer first (a verdict is not taken on trust)"
         )
     entry["review_rounds"] += 1
-    if verdict == "clean" and int(state.get("observed_agent_runs", 0)):
+    if verdict == "clean" and (int(state.get("observed_agent_runs", 0)) or state.get("hooks_live")):
         state["accepted_reviews"] = int(state.get("accepted_reviews", 0)) + 1
     _gate(state)["reviewed"] = tree(cfg.root, state) if verdict == "clean" else None
     if verdict == "changes" and entry["review_rounds"] >= cfg.limits.max_review_rounds:
@@ -624,8 +737,18 @@ def record_review(cfg: Config, task_id: str, verdict: str) -> State:
 
 
 @locked
+def _known_task(root: Path, state: State, task_id: str) -> None:
+    try:
+        known = {task.id for task in parse_tasks(tasks_path(root, state))}
+    except (OSError, ValueError):
+        return  # an unreadable table is reported by the commands that need it
+    if task_id not in known:
+        raise ValueError(f"there is no task {task_id} in {state['spec_dir']}/tasks.md")
+
+
 def record_assumption(root: Path, task_id: str, text: str) -> State:
     state = require(root)
+    _known_task(root, state, task_id)
     _task(state, task_id)["assumptions"].append(text)
     save(root, state)
     return state
@@ -635,25 +758,54 @@ def done_problem(cfg: Config, state: State, task_id: str, risk: str = "high") ->
     """Why ``task_id`` cannot be ticked yet, or None when it can."""
     gate = _gate(state)
     if task_id not in gate["group"]:
-        return f"{task_id} is not in the group in flight ({gate['group']}); run `sdd next`"
+        flying = ", ".join(gate["group"]) or "none"
+        return f"{task_id} is not in the group in flight ({flying}); run `sdd next`"
     now = tree(cfg.root, state)
     if gate["passed"] != now:
         return "no passing `sdd check` for the code as it is now; run the gate again"
     if risk not in cfg.review_skip and gate["reviewed"] != now:
         return "no clean review for the code as it is now; review it (again) first"
-    return scope.problem(cfg, state)
+    problem = scope.problem(cfg, state) or drift.problem(cfg, state)
+    if problem:
+        return problem
+    return tdd_problem(cfg, state, task_id, risk) if cfg.tdd_mode == "enforce" else None
+
+
+def _task_risk(cfg: Config, state: State, task_id: str) -> str:
+    """The task's risk from tasks.md; the strictest one when the table cannot be read."""
+    try:
+        return {t.id: t.risk for t in parse_tasks(tasks_path(cfg.root, state))}.get(task_id, "high")
+    except (OSError, ValueError):
+        return "high"
+
+
+def red_warning(cfg: Config, state: State, task_id: str) -> str | None:
+    """Warn mode: the same finding, shown but not blocking."""
+    if cfg.tdd_mode != "warn":
+        return None
+    if tdd_problem(cfg, state, task_id, _task_risk(cfg, state, task_id)) is None:
+        return None
+    return (
+        f"{task_id} is ticked, but no failing test run was recorded for this group, so "
+        "test-first is not shown. Next time run the failing test through `sdd check` before "
+        'implementing, or say why none applies with `--waive-red "reason"`'
+    )
 
 
 @locked
-def complete(cfg: Config, task_id: str, human: bool = False) -> State:
+def complete(cfg: Config, task_id: str, human: bool = False, waive_red: str | None = None) -> State:
     """Tick a task, but only after a passing gate and a clean review of the current tree."""
     state = require(cfg.root)
+    _not_halted(state)
     path = tasks_path(cfg.root, state)
     problem = integrity_problem(cfg, state)
     if problem:
         halt(cfg.root, state, problem)
         raise ValueError(problem)
     risk = {t.id: t.risk for t in parse_tasks(path)}.get(task_id, "high")
+    if waive_red:
+        # Kept in the task's assumptions, so the user sees the reason in the report.
+        _task(state, task_id)["assumptions"].append(f"{RED_WAIVER}{waive_red}")
     problem = done_problem(cfg, state, task_id, risk)
     if problem:
         raise ValueError(problem)

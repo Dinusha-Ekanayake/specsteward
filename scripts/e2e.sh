@@ -77,6 +77,21 @@ $SDD check
 $SDD review T-001-02 clean
 $SDD done T-001-02
 
+step "hook runner: the guards answer through scripts/hooks/run.cmd (the way Claude Code starts them)"
+export CLAUDE_PLUGIN_ROOT="$PLUGIN"
+HOOK_RUN="$PLUGIN/scripts/hooks/run.cmd"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) echo "(Windows: the runner is covered by tests/test_plugin_layout.py in the test job)" ;;
+  *)
+    out="$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"bash .sdd/bin/sdd approve 001"}}' | "$HOOK_RUN" shell-guard)"
+    echo "$out" | grep -q '"ask"' || { echo "UNEXPECTED: shell guard did not ask: $out"; exit 1; }
+    out="$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | "$HOOK_RUN" shell-guard)"
+    [ -z "$out" ] || { echo "UNEXPECTED: shell guard blocked ls: $out"; exit 1; }
+    out="$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".sdd/state.json"}}' | "$HOOK_RUN" guard)"
+    echo "$out" | grep -q 'deny' || { echo "UNEXPECTED: file guard did not deny: $out"; exit 1; }
+    ;;
+esac
+
 step "converge (nothing missing), status, views"
 $SDD next
 $SDD converge

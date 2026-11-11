@@ -1,6 +1,6 @@
 # Configuration (`sdd.toml`)
 
-`sdd init` writes this file at the repository root. It detects the stack (Python, Node, Go, Rust, or a Makefile) and builds the gate from what the project already uses, so it normally works without editing. Run `sdd doctor` to check it. Every section is optional; the defaults are shown.
+`sdd init` writes this file at the repository root. It detects the stack (Python, Node, Go, Rust, or a Makefile) and builds the gate from what the project already uses, so it normally works without editing. Run `sdd doctor` to check it. Every section is optional. The blocks show the defaults, except where a value is marked as an example.
 
 Any change to `sdd.toml` makes it **untrusted** until you run `sdd trust` (a permission prompt). Until then `sdd check` and the format hook run nothing. See [security.md](security.md).
 
@@ -82,12 +82,40 @@ Only `"low"` is allowed. High and human risk are always reviewed.
 [scope]
 mode = "enforce"        # enforce | warn | off: files outside the plan
 symbols = "warn"        # enforce | warn | off: public symbols the plan does not name
-allow = ["docs/**"]     # extra globs a run may always touch
+surface = "warn"        # enforce | warn | off: new imports and calls that reach out
+growth = "warn"         # enforce | warn | off: a function that grew past max_growth
+max_growth = 80         # syntax-tree nodes a function may gain in one run (0 = off)
+allow = ["docs/**"]     # example; default []: extra globs a run may always touch
 ```
 
-The approval hash proves the spec, plan and task table did not change. It cannot see code wandering outside them, so `sdd done` also compares the files changed since the run started with the files the approved plan names in backticks (the `Modules / files` table). Tests, `CHANGELOG*` and the spec folder are always allowed. In `enforce` mode a task is not ticked while anything else has changed; `sdd scope` lists the files. To widen the scope, add the file to `plan.md`: that changes the approved plan, so the spec has to be approved again before the run goes on. `warn` only lists them; a plan that names no files is not checked.
+The approval hash proves the spec, plan and task table did not change. It cannot see code wandering outside them, so `sdd done` also compares the files changed since the run started with the files the approved plan names in backticks (the `Modules / files` table). Tests, `CHANGELOG*` and the spec folder are always allowed (`sdd scope` lists what only the allow-list let through, so it stays visible). Files that were already changed when the run started are compared by content, so the run is blamed only for what it does to them. A symbol counts as named only in the plan's `Modules / files` section, a `path::name` mention, or a task row. In `enforce` mode a task is not ticked while anything else has changed; `sdd scope` lists the files. To widen the scope, add the file to `plan.md`: that changes the approved plan, so the spec has to be approved again before the run goes on. `warn` only lists them; a plan that names no files is not checked.
 
-`symbols` goes one level deeper, inside files the plan does name: a public function, class or method that a run adds or changes in a file that existed before the run must be mentioned in backticks in `plan.md` or `tasks.md` (`` `login()` ``, `` `Auth.login` ``). Private names (leading underscore), new files and tests are not checked. Python is compared by syntax tree (a moved or reformatted function is not a change); JavaScript and TypeScript only see new `export`s. The default is `warn`, which prints the names on `sdd done`; `enforce` makes `sdd done` refuse until they are named, which changes the plan and so needs approval again.
+`symbols` goes one level deeper, inside files the plan does name: a public function, class or method that a run adds or changes in a file that existed before the run must be named in backticks in the plan's `Modules / files` section, on a `path::name` line, or in a task row (`` `login()` ``, `` `Auth.login` ``). Private names (leading underscore), new files and tests are not checked. Python is compared by syntax tree (a moved or reformatted function is not a change); JavaScript and TypeScript only see new `export`s. The default is `warn`, which prints the names on `sdd done`; `enforce` makes `sdd done` refuse until they are named, which changes the plan and so needs approval again.
+
+`surface`, `growth` and `[coverage]` look at what a run does *inside* a function the plan already names. None of them proves the code correct; they make silent drift visible, or refuse it.
+
+- `surface`: a changed source file may not gain an import of, or a call to, a process, the network, `eval`/`exec`, a file deletion or a write-mode `open`, unless the plan's `Modules / files` section, a `path::name` line or a task row names it in backticks (`` `subprocess` ``). Naming a watched package covers its calls (`subprocess` covers `subprocess.run`); naming `os` does not cover `os.system`. Imports are followed through aliases, and uses are counted, so one more call in a file that already had one is still new. Files named like tests but kept outside a test folder are read too. This is a list of known names, not a proof: it makes reaching out visible, and code can still do it in ways the list does not know. Python is read by syntax tree; JavaScript and TypeScript by `require`/`import` of `child_process`, `fs`, `net`, `http`, `https` and the like, plus `eval` and `new Function`.
+- `growth`: a function or method that gained more than `max_growth` syntax-tree nodes (about eight simple statements for 80) is listed, and so is a new function the plan does not name that is larger than three budgets (a private helper is where unplanned behaviour would otherwise hide). Python only.
+- `[coverage]`: every line a run adds or changes must be run by a test. The report comes from your own test run, so this trusts the tests: it catches code no test reaches, not a test suite written to lie.
+
+```toml
+[coverage]
+report = "coverage.xml"   # example; default "" (off): Cobertura XML or lcov file your test step writes
+mode = "warn"             # enforce | warn | off
+```
+
+Point `report` at the file your own test step produces (`pytest --cov --cov-report=xml`, `jest --coverage --coverageReporters=lcov` and so on) and add the flag to the `[[check]]` test command. `sdd done` then compares the report with the lines changed since the run started. A report that is missing, unreadable or older than the changes counts as a finding, and at `sdd done` the report must be the very file the last passing gate left behind, so one edited by hand afterwards does not count. Keep the report out of git: `coverage.xml` and a top-level `coverage/` folder are already ignored by the scope guard; put any other location in `.gitignore`. In `enforce` mode `sdd done` refuses until each finding is fixed, named in the plan (which needs approval again) or reverted. The defaults are `warn`.
+
+## `[tdd]`
+
+```toml
+[tdd]
+red_first = "warn"   # warn | enforce | off
+```
+
+Test-first is an instruction to the implementer, so specsteward also keeps evidence of it. Every `sdd check` during a run whose test step fails (a step whose name contains "test") marks the group in flight as having had a red run. With `warn` (the default), `sdd done` prints a warning when it ticks a task from a group that never failed a test; with `enforce` it refuses. `off` turns it off. A project without a test step, and `human` tasks, are never asked.
+
+This proves a failing test run happened before the passing one, not that the failure was the right one or that the test came before the code. When no test applies (documentation, configuration), the task can still be ticked with `sdd done T-003-01 --waive-red "documentation only"`; the reason is kept in the task's assumptions, so the report shows it.
 
 ## `[limits]`
 
@@ -129,7 +157,7 @@ Briefs are capped (40 plan lines, 12 files, 25 names per file); anything cut is 
 `.claude/settings.json` gets, without removing anything already there:
 
 - `allow`: `bash .sdd/bin/sdd` (everything not listed under `ask`), `git status`, `git diff`, `git log`, `git rev-parse`
-- `ask`: `sdd approve`, `sdd trust`, `sdd start`, `sdd resume`, `sdd signoff`, `git commit`, `git push`, `gh pr create`, `gh pr merge`
+- `ask`: `sdd approve`, `sdd trust`, `sdd start`, `sdd resume`, `sdd signoff`, `sdd phone`, `sdd install`, `sdd worktree`, `sdd init`, `git commit`, `git push`, `gh pr create`, `gh pr merge`. Each `sdd` rule is written twice, for the Bash tool and for the PowerShell tool (Claude Code on Windows may use either)
 - `deny`: `Edit(.sdd/**)`, `Edit(~/.claude/specsteward/**)`, `Edit(.claude/settings.json)`, `Edit(.claude/settings.local.json)`
 
 `ask` wins over `allow`, so the gates always prompt. You may drop the `git` rules if you want commits without a prompt; `sdd doctor` will only warn. The `sdd` rules are the gates and `sdd doctor` fails without them.

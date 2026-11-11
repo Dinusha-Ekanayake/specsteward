@@ -49,7 +49,17 @@ def test_check_steps_and_format_parsed(repo: Path) -> None:
         ({"check": [{"name": "x", "cmd": ["x"], "keep": "("}]}, "missing \\)"),
         ({"check": [{"cmd": ["x"]}]}, "name and a cmd"),
         ({"models": {"medium": "opus"}}, "keys must be"),
-        ({"limits": {"max_fix_attempts": 0}}, "at least 1"),
+        ({"limits": {"max_fix_attempts": 0}}, "whole number, 1 or more"),
+        ({"limits": {"max_foo": 3}}, "has no key 'max_foo'"),
+        ({"scope": {"symbol": "enforce"}}, "has no key 'symbol'"),
+        ({"coverage": {"reports": "x"}}, "has no key 'reports'"),
+        ({"tdd": {"red": "enforce"}}, "has no key 'red'"),
+        ({"limits": {"max_tokens": "many"}}, "max_tokens must be a whole number"),
+        ({"scope": {"allow": 3}}, "a string or a list of strings"),
+        ({"groups": {"max_size": "a"}}, "max_size must be a whole number"),
+        ({"groups": {"max_size": 0}}, "max_size must be a whole number"),
+        ({"project": {"branch_prefix": "feature/{x}-"}}, "placeholder {spec}"),
+        ({"check": [{"name": "t", "cmd": ["x"], "timeout": "soon"}]}, "whole number of seconds"),
     ],
 )
 def test_invalid_config_rejected(repo: Path, raw: dict, match: str) -> None:  # type: ignore[type-arg]
@@ -136,7 +146,7 @@ def test_pipes_inside_backticks_or_escaped_stay_in_the_cell(tmp_path: Path) -> N
     path = tmp_path / "tasks.md"
     path.write_text(
         "| ID | Task | Test | Risk | Status |\n|---|---|---|---|---|\n"
-        "| T-001-01 | parse `a | b` and a \| c | ok | low | [ ] |\n"
+        "| T-001-01 | parse `a | b` and a \\| c | ok | low | [ ] |\n"
     )
     task = parse_tasks(path)[0]
     assert task.text == "parse `a | b` and a | c" and task.status == "[ ]"

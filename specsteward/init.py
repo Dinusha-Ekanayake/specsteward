@@ -1,7 +1,9 @@
 """``sdd init``: set up a project with a config preset, templates and permission rules."""
 
 import json
+import re
 import shutil
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,16 @@ ASK = [
     "Bash(gh pr merge:*)",
 ]
 
+# Commands that install software, rewrite launchers or create worktrees: not gates, but
+# nothing an agent should start without the user seeing it. (`ask` beats the broad allow.)
+EXTRA_ASK = [f"Bash({SDD} {name}:*)" for name in ("phone", "install", "worktree", "init")]
+
+# Claude Code on Windows runs shell commands with the PowerShell tool, which the Bash rules
+# above do not cover, so the same gates are repeated for it.
+POWERSHELL_ASK = [rule.replace("Bash(", "PowerShell(", 1) for rule in ASK]
+POWERSHELL_EXTRA_ASK = [rule.replace("Bash(", "PowerShell(", 1) for rule in EXTRA_ASK]
+POWERSHELL_ALLOW = [rule.replace("Bash(", "PowerShell(", 1) for rule in ALLOW[:1]]
+
 # Defence in depth next to the PreToolUse guard hook: file tools never edit run state
 # or the trust store. "Edit" rules cover every built-in file-editing tool.
 DENY = [
@@ -45,8 +57,46 @@ DENY = [
 ]
 
 
+_SPECS_DIR = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*")
+
+
+SCRIPT_RUNNERS = frozenset(
+    ("npm", "pnpm", "yarn", "bun", "npx", "make", "just", "task", "rake", "tox", "nox", "hatch")
+    + ("gradle", "gradlew", "mvn", "mvnw", "poetry", "pdm", "uv", "sh", "bash", "cargo-make")
+)
+
+
+def runs_repo_scripts(root: Path) -> bool:
+    """True when a check or format command starts the project's own scripts (`npm run lint`,
+    `make test`), whose bodies the repository controls, rather than a fixed tool."""
+    try:
+        with (root / CONFIG_FILE).open("rb") as handle:
+            raw = tomllib.load(handle)
+    except (OSError, ValueError):
+        return True
+    commands = [step.get("cmd", []) for step in raw.get("check", [])]
+    for formats in raw.get("format", {}).values():
+        commands.extend(formats)
+    for cmd in commands:
+        first = str(cmd[0]).replace("\\", "/").rsplit("/", 1)[-1].lower() if cmd else ""
+        if first in SCRIPT_RUNNERS or first.startswith(("./", "../")):
+            return True
+    return False
+
+
+def check_specs_dir(specs_dir: str) -> str:
+    """A relative folder of plain names: it ends up inside sdd.toml and on disk."""
+    parts = specs_dir.split("/")
+    if not _SPECS_DIR.fullmatch(specs_dir) or ".." in parts or "." in parts:
+        raise ValueError(
+            f"--specs-dir must be a plain relative folder such as specs, got {specs_dir!r}"
+        )
+    return specs_dir
+
+
 def render_config(root: Path, preset: str = "auto", specs_dir: str = "specs") -> str:
     """``sdd.toml`` for this project, with the gate built from what it already uses."""
+    check_specs_dir(specs_dir)
     chosen = preset_for(root, preset)
     text = (TEMPLATES / CONFIG_FILE).read_text(encoding="utf-8")
     scan = "[" + ", ".join(f'"{name}"' for name in chosen.scan) + "]"
@@ -68,7 +118,11 @@ def _merge_settings(path: Path) -> list[str]:
     # user's to relax, and removing one must not be undone by the next `init`.
     rerun = ALLOW[0] in permissions.get("allow", [])
     added = []
-    for key, rules in (("allow", ALLOW), ("ask", ASK), ("deny", DENY)):
+    for key, rules in (
+        ("allow", [*ALLOW, *POWERSHELL_ALLOW]),
+        ("ask", [*ASK, *EXTRA_ASK, *POWERSHELL_ASK, *POWERSHELL_EXTRA_ASK]),
+        ("deny", DENY),
+    ):
         existing = permissions.setdefault(key, [])
         for rule in rules:
             if rerun and key != "deny" and ".sdd/bin/sdd" not in rule:
@@ -188,6 +242,7 @@ def init_project(
     root: Path, preset: str = "auto", specs_dir: str = "specs", force: bool = False
 ) -> list[str]:
     """Create what is missing and report each change. Never overwrites without ``force``."""
+    check_specs_dir(specs_dir)
     done = []
     config = root / CONFIG_FILE
     if config.exists() and not force:
@@ -207,8 +262,14 @@ def init_project(
             # trust the (weaker) default: the user reviews it and runs `sdd trust`.
             done.append(f"replaced {CONFIG_FILE} ({stack} project; checks: {steps}; NOT trusted)")
             done.append(f"review {CONFIG_FILE}, then run `{SDD} trust` before the first check")
+        elif runs_repo_scripts(root):
+            done.append(f"wrote {CONFIG_FILE} ({stack} project; checks: {steps}; NOT trusted)")
+            done.append(
+                f"its commands run scripts from this repository; review {CONFIG_FILE}, "
+                f"then run `{SDD} trust`"
+            )
         else:
-            trust.trust_config(root)  # a new file the user asked for starts trusted
+            trust.trust_config(root)  # fixed tool commands the user asked for start trusted
             done.append(f"wrote {CONFIG_FILE} ({stack} project; checks: {steps}; trusted)")
             if steps == "none found":
                 done.append(f"add your test command under [[check]] in {CONFIG_FILE} before a run")
@@ -234,7 +295,11 @@ def init_project(
     for key in ("allow", "ask", "deny"):
         added = [rule.split(": ", 1)[1] for rule in rules if rule.startswith(f"{key}: ")]
         if added:
-            done.append(f"permission rules ({labels[key]}): {', '.join(added)}")
+            shown = ", ".join(added[:3])
+            more = (
+                f" and {len(added) - 3} more (see .claude/settings.json)" if len(added) > 3 else ""
+            )
+            done.append(f"permission rules ({labels[key]}): {shown}{more}")
     legacy = _drop_legacy_project_hooks(root / ".claude" / "settings.json")
     if legacy:
         done.append(f"removed project hooks the plugin now provides: {', '.join(legacy)}")

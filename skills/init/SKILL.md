@@ -13,8 +13,9 @@ description: Set up specsteward in the current repository - detects the stack an
 2. If the init output says "removed project hooks", tell the user the plugin now supplies
    those hooks and the project copies were duplicates (they ran every hook twice).
    Run `bash .sdd/bin/sdd doctor` and fix every `FAIL` line with the user, using the fix
-   it prints. If `sdd.toml` already existed, the user must review it and run
-   `bash .sdd/bin/sdd trust` themselves (it is a permission prompt).
+   it prints. If init said `NOT trusted` (an `sdd.toml` that already existed, or a Node or
+   Makefile gate that runs the project's own scripts), the user must review `sdd.toml` and
+   run `bash .sdd/bin/sdd trust` themselves (it is a permission prompt).
 3. Run `bash .sdd/bin/sdd check` once. If a step fails because of the project (not the
    setup), tell the user; that is the baseline the runs start from.
 4. Tell the user, in at most five lines, what was detected and the next steps:

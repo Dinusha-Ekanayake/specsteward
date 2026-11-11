@@ -5,12 +5,15 @@ symlink, so that specsteward's own writes (state, logs, the shim, ignore files) 
 file outside the project, such as a shell profile. Every write goes through this check.
 """
 
+import os
 from pathlib import Path
 
 
 def ensure_safe(root: Path, path: Path) -> None:
     """Raise ValueError if ``path`` is outside ``root`` or any part of it below ``root``
     (folders or the file itself) is a symlink."""
+    path = Path(os.path.normpath(path))  # `root/../x` must not pass for being under root
+    root = Path(os.path.normpath(root))
     try:
         rel = path.relative_to(root)
     except ValueError as error:
