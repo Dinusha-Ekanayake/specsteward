@@ -465,11 +465,26 @@ def _has_base(state: dict[str, Any]) -> bool:
     return bool((state.get("scope") or {}).get("base"))
 
 
-def _checks(cfg: Config, final: bool) -> list[tuple[str, str, Any]]:
+STRICT_RISKS = ("high", "human")  # where the mode "auto" blocks; it warns for the rest
+
+
+def effective(mode: str, risk: str) -> str:
+    """What a mode means for a task of this risk: "auto" follows the risk."""
+    if mode != "auto":
+        return mode
+    return "enforce" if risk in STRICT_RISKS else "warn"
+
+
+def _checks(cfg: Config, final: bool) -> list[tuple[str, str, Any, str]]:
     return [
-        (cfg.coverage_mode, "uncovered change", lambda c, s, src: uncovered(c, s, final, src)),
-        (cfg.surface_mode, "new side effect", new_surface),
-        (cfg.growth_mode, "large change", grown),
+        (
+            cfg.coverage_mode,
+            "uncovered change",
+            lambda c, s, src: uncovered(c, s, final, src),
+            "[coverage] mode",
+        ),
+        (cfg.surface_mode, "new side effect", new_surface, "[scope] surface"),
+        (cfg.growth_mode, "large change", grown, "[scope] growth"),
     ]
 
 
@@ -482,7 +497,7 @@ def notes(cfg: Config, state: dict[str, Any], final: bool = False) -> list[str]:
     sources = list(scope.changed_sources(cfg, state))  # read once for all three checks
     lines = [
         f"{label}: {line}"
-        for mode, label, check in _checks(cfg, final)
+        for mode, label, check, _setting in _checks(cfg, final)
         if mode != "off"
         for line in check(cfg, state, sources)
     ]
@@ -490,23 +505,35 @@ def notes(cfg: Config, state: dict[str, Any], final: bool = False) -> list[str]:
     return lines
 
 
-def problem(cfg: Config, state: dict[str, Any]) -> str | None:
-    """Why `sdd done` must refuse (enforce mode only), or None."""
-    modes = (cfg.surface_mode, cfg.growth_mode)
-    enforced = "enforce" in modes or (cfg.coverage_mode == "enforce" and cfg.coverage_report)
-    if not enforced:
+def problem(cfg: Config, state: dict[str, Any], risk: str = "low") -> str | None:
+    """Why `sdd done` must refuse a task of this risk, or None.
+
+    A check blocks in enforce mode, and in "auto" mode when the task is high risk or human.
+    """
+    blocking = [
+        (mode, label, check, setting)
+        for mode, label, check, setting in _checks(cfg, True)
+        if effective(mode, risk) == "enforce"
+        and (label != "uncovered change" or cfg.coverage_report)
+    ]
+    if not blocking:
         return None
     if not _has_base(state):
-        return NO_BASE
+        # Only a project that asked for enforce is refused; "auto" stays a note (`notes`).
+        return NO_BASE if any(mode == "enforce" for mode, *_ in blocking) else None
     sources = list(scope.changed_sources(cfg, state))
-    for mode, label, check in _checks(cfg, True):
-        if mode != "enforce":
-            continue
+    for mode, label, check, setting in blocking:
         found = check(cfg, state, sources)
         if found:
             shown = "; ".join(found[:4]) + (f" and {len(found) - 4} more" if len(found) > 4 else "")
+            why = (
+                f" This blocks because the task is {risk} risk; "
+                f'`{setting} = "warn"` in sdd.toml makes it a warning.'
+                if mode == "auto"
+                else ""
+            )
             return (
                 f"{label}: {shown}. Fix it (a test that runs the lines, naming the item in "
-                f"{state['spec_dir']}/plan.md and approving again, or a smaller change)"
+                f"{state['spec_dir']}/plan.md and approving again, or a smaller change).{why}"
             )
     return None

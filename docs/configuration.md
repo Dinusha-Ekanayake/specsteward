@@ -82,7 +82,7 @@ Only `"low"` is allowed. High and human risk are always reviewed.
 [scope]
 mode = "enforce"        # enforce | warn | off: files outside the plan
 symbols = "warn"        # enforce | warn | off: public symbols the plan does not name
-surface = "warn"        # enforce | warn | off: new imports and calls that reach out
+surface = "auto"        # auto | enforce | warn | off: new imports and calls that reach out
 growth = "warn"         # enforce | warn | off: a function that grew past max_growth
 max_growth = 80         # syntax-tree nodes a function may gain in one run (0 = off)
 allow = ["docs/**"]     # example; default []: extra globs a run may always touch
@@ -94,6 +94,8 @@ The approval hash proves the spec, plan and task table did not change. It cannot
 
 `surface`, `growth` and `[coverage]` look at what a run does *inside* a function the plan already names. None of them proves the code correct; they make silent drift visible, or refuse it.
 
+`surface` and `[coverage] mode` default to `auto`, which follows the risk of the task: for a task marked `high` or `human` in `tasks.md` the finding blocks `sdd done`, for a `low` task it is a warning. `enforce` blocks every task, `warn` never blocks, `off` does not look. `growth` has no `auto`: an honest refactor trips it too often to block on by default. The checks compare the whole run with the commit it started from, so a side effect a low-risk task added still has to be named in the plan (or removed) before a later high-risk task is ticked. A run in a repository with no commit cannot be compared; `auto` then only says so, `enforce` refuses.
+
 - `surface`: a changed source file may not gain an import of, or a call to, a process, the network, `eval`/`exec`, a file deletion or a write-mode `open`, unless the plan's `Modules / files` section, a `path::name` line or a task row names it in backticks (`` `subprocess` ``). Naming a watched package covers its calls (`subprocess` covers `subprocess.run`); naming `os` does not cover `os.system`. Imports are followed through aliases, and uses are counted, so one more call in a file that already had one is still new. Files named like tests but kept outside a test folder are read too. This is a list of known names, not a proof: it makes reaching out visible, and code can still do it in ways the list does not know. Python is read by syntax tree; JavaScript and TypeScript by `require`/`import` of `child_process`, `fs`, `net`, `http`, `https` and the like, plus `eval` and `new Function`.
 - `growth`: a function or method that gained more than `max_growth` syntax-tree nodes (about eight simple statements for 80) is listed, and so is a new function the plan does not name that is larger than three budgets (a private helper is where unplanned behaviour would otherwise hide). Python only.
 - `[coverage]`: every line a run adds or changes must be run by a test. The report comes from your own test run, so this trusts the tests: it catches code no test reaches, not a test suite written to lie.
@@ -101,7 +103,7 @@ The approval hash proves the spec, plan and task table did not change. It cannot
 ```toml
 [coverage]
 report = "coverage.xml"   # example; default "" (off): Cobertura XML or lcov file your test step writes
-mode = "warn"             # enforce | warn | off
+mode = "auto"             # auto | enforce | warn | off
 ```
 
 Point `report` at the file your own test step produces (`pytest --cov --cov-report=xml`, `jest --coverage --coverageReporters=lcov` and so on) and add the flag to the `[[check]]` test command. `sdd done` then compares the report with the lines changed since the run started. A report that is missing, unreadable or older than the changes counts as a finding, and at `sdd done` the report must be the very file the last passing gate left behind, so one edited by hand afterwards does not count. Keep the report out of git: `coverage.xml` and a top-level `coverage/` folder are already ignored by the scope guard; put any other location in `.gitignore`. In `enforce` mode `sdd done` refuses until each finding is fixed, named in the plan (which needs approval again) or reverted. The defaults are `warn`.

@@ -29,7 +29,8 @@ human = "opus"
 [scope]
 # mode = "enforce"   # enforce | warn | off: changes outside the plan's files block `sdd done`
 # symbols = "warn"  # enforce | warn | off: public symbols the plan does not name
-# surface = "warn"   # enforce | warn | off: new imports/calls that reach out (process, network, eval)
+# surface = "auto"   # auto | enforce | warn | off: new imports/calls that reach out (process,
+#                    # network, eval). auto blocks a high-risk or human task, warns for a low one
 # growth = "warn"    # enforce | warn | off: a function that grew by more than max_growth nodes
 # max_growth = 80
 # allow = []         # extra globs a run may always touch
@@ -37,7 +38,7 @@ human = "opus"
 # Changed lines must be run by a test. Point report at the file your test step writes.
 [coverage]
 # report = "coverage.xml"   # Cobertura XML or lcov
-# mode = "warn"             # enforce | warn | off
+# mode = "auto"             # auto | enforce | warn | off (auto: blocks high-risk and human tasks)
 
 [tdd]
 # red_first = "warn"   # warn | enforce | off: a failing test run must come before the passing one
