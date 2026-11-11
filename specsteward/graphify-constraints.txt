@@ -2,7 +2,7 @@
 # file (uv -c / pip -c). PyPI never replaces a published version's files, so exact
 # versions keep a new, possibly malicious release of any dependency out. Regenerate
 # when bumping GRAPHIFY_VERSION: install it with uv, then `uv pip freeze` its tool env.
-graphifyy==0.9.100
+graphifyy==0.9.104
 networkx==3.7
 numpy==2.5.4
 pyyaml==6.0.3
